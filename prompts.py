@@ -93,8 +93,9 @@ CRITICAL RULES:
    - Extract exact commentary from company's earnings call or result statement
    - Identify sentiment: BULLISH (beating expectations, strong growth) / BEARISH (missing expectations, weak growth) / NEUTRAL (in-line with expectations)
    - Assess impact: HIGH (major profit beat/miss) / MEDIUM (moderate variance) / LOW (minor variance)
-   - Provide short-term forecast (1-4 weeks) based on Q3 results
-   - Provide medium-term forecast (1-3 months) based on management guidance
+   - Analyze Work Culture (Glassdoor/AmbitionBox), Sector News, and Stock Specific News to inform forecasts.
+   - Provide short-term forecast (1-4 weeks) considering Q3 results, stock-specific news, and immediate sector trends.
+   - Provide medium-term forecast (1-3 months) considering management guidance, work culture sentiment, and broader sector news.
    - Include management guidance if mentioned, else "Not provided"
    - Recommendation: BUY/SELL/HOLD based on results vs expectations
 9. All financial figures in INR (Indian Rupees)
@@ -108,6 +109,8 @@ DATA SOURCES (Check these FIRST):
 2. NSE Official Website (www.nseindia.com) - Corporate announcements
 3. BSE Official Website (www.bseindia.com) - Announcements
 4. Company investor relations pages (official sources)
+5. Glassdoor/AmbitionBox (for work culture)
+6. General financial news (for sector/stock news)
 
 OUTPUT FORMAT (Return ONLY this JSON structure):
 {{
@@ -127,8 +130,8 @@ OUTPUT FORMAT (Return ONLY this JSON structure):
       "source": "Moneycontrol/NSE/Company official",
       "sentiment": "BULLISH/BEARISH/NEUTRAL",
       "impact": "HIGH/MEDIUM/LOW",
-      "forecast_short_term": "Stock expected to move UP/DOWN/MIXED in next 1-4 weeks based on Q3 results. Reasons: ...",
-      "forecast_medium_term": "Stock expected to move UP/DOWN/MIXED in next 1-3 months based on Q3 guidance. Reasons: ...",
+      "forecast_short_term": "Stock expected to move UP/DOWN/MIXED in next 1-4 weeks based on Q3 results, stock news, and sector trends. Reasons: ...",
+      "forecast_medium_term": "Stock expected to move UP/DOWN/MIXED in next 1-3 months based on guidance, work culture, and sector outlook. Reasons: ...",
       "guidance": "Management guidance for coming quarters if mentioned",
       "recommendation": "BUY/SELL/HOLD"
     }}
