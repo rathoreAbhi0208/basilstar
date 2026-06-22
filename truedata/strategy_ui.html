@@ -420,13 +420,32 @@ function connectWS() {
 // ─── Modal ───────────────────────────────────────────────────────────────────
 
 function showModal(title, content) {
+  const existing = document.getElementById('resultModal');
+  if (existing) existing.remove();
+
   const m = document.createElement('div');
+  m.id = 'resultModal';
   m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:100;display:flex;align-items:center;justify-content:center';
-  m.innerHTML = `<div style="background:#1a1a2e;border:1px solid #2a2a3e;border-radius:12px;padding:24px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h3>${title}</h3><button class="btn btn-outline" onclick="this.closest('div[style]').remove()">✕ Close</button>
-    </div>${content}</div>`;
+
+  m.onclick = (e) => { if (e.target === m) m.remove(); };
+
+  m.innerHTML = `
+    <div style="background:#1a1a2e;border:1px solid #2a2a3e;border-radius:12px;padding:24px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h3 style="color:#fff">${title}</h3>
+        <button class="btn btn-outline" onclick="document.getElementById('resultModal').remove()">✕ Close</button>
+      </div>
+      ${content}
+    </div>`;
+
   document.body.appendChild(m);
+
+  document.onkeydown = (e) => {
+    if (e.key === 'Escape') {
+      const mo = document.getElementById('resultModal');
+      if (mo) mo.remove();
+    }
+  };
 }
 
 init();

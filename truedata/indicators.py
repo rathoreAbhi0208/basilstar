@@ -131,6 +131,9 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df['ha_ema_5'] = ema(ha_close, 5)
     df['ha_ema_9'] = ema(ha_close, 9)
 
+    # Volume MA
+    df['volume_ma_20'] = sma(v, 20)
+
     # Rolling stats
     df['highest_high_18'] = h.rolling(18).max()
     df['lowest_low_18'] = l.rolling(18).min()

@@ -29,7 +29,7 @@ BULLISH_RULES_FILE  = "bullish.txt"
 BEARISH_RULES_FILE  = "bearish.txt"
 ALERT_THRESHOLD_PCT = 70    # % of rules that must pass to fire alert
 COOLDOWN_SECONDS    = 300   # Don't re-alert same symbol within 5 mins
-MIN_TICKS           = 10    # Min ticks before a symbol is evaluated
+MIN_TICKS           = 3     # Min ticks before a symbol is evaluated
 EVAL_DEBOUNCE_SECONDS = 5     # Max one evaluation per symbol per 5 seconds
 
 # ─── Candle Store ────────────────────────────────────────────────────────────
@@ -88,7 +88,7 @@ class CandleStore:
                     ohlcv['volume'] = (vol.last() - vol.first()).clip(lower=0)
                     ohlcv.dropna(inplace=True)
 
-                if len(ohlcv) >= 2:
+                if len(ohlcv) >= 1:
                     result[label] = compute_indicators(ohlcv)
             except Exception:
                 pass
