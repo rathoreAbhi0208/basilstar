@@ -25,3 +25,5 @@ build/
 .env*
 local_settings.py
 local.py
+
+venv
