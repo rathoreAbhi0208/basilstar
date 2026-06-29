@@ -47,8 +47,20 @@ CREATE TABLE IF NOT EXISTS news_articles (
     affected_companies      TEXT    NOT NULL,   -- JSON array
     tags                    TEXT    NOT NULL,   -- JSON array
     expires_at_unix         REAL    NOT NULL,
+    primary_entity          TEXT,
+    entity_type             TEXT,
+    image_query             TEXT,
     image_url               TEXT,
     image_alt               TEXT
+);
+"""
+
+_CREATE_IMAGE_CACHE_SQL = """
+CREATE TABLE IF NOT EXISTS image_cache (
+    query       TEXT PRIMARY KEY,
+    image_url   TEXT NOT NULL,
+    provider    TEXT NOT NULL,
+    timestamp   REAL NOT NULL
 );
 """
 
@@ -67,8 +79,8 @@ INSERT OR IGNORE INTO news_articles (
     sentiment, impact, importance_score, confidence_score,
     market_impact, retail_investor_impact, institutional_impact,
     affected_sectors, affected_companies, tags, expires_at_unix,
-    image_url, image_alt
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    primary_entity, entity_type, image_query, image_url, image_alt
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 """
 
 
@@ -85,6 +97,7 @@ class NewsDB:
             await db.execute("PRAGMA synchronous=NORMAL;")
             await db.execute("PRAGMA cache_size=-32000;")   # 32 MB page cache
             await db.execute(_CREATE_TABLE_SQL)
+            await db.execute(_CREATE_IMAGE_CACHE_SQL)
             for idx in _INDEXES:
                 await db.execute(idx)
             await db.commit()
@@ -126,6 +139,9 @@ class NewsDB:
                 json.dumps(a.affected_companies),
                 json.dumps(a.tags),
                 now_unix + _TTL_SECS,
+                a.primary_entity,
+                a.entity_type,
+                a.image_query,
                 a.image_url,
                 a.image_alt,
             ))
@@ -156,6 +172,38 @@ class NewsDB:
             await db.commit()
         logger.info("[Database] Pruned %d expired articles", cursor.rowcount)
         return cursor.rowcount
+
+    # ── Image Cache ──────────────────────────────────────────────────────
+
+    async def get_cached_image(self, query: str, ttl_hours: int = 24 * 7) -> Optional[dict]:
+        """Fetch cached image result if valid within TTL."""
+        if not query:
+            return None
+            
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT * FROM image_cache WHERE query = ?",
+                (query.lower(),),
+            )
+            row = await cur.fetchone()
+            
+        if row:
+            if (time.time() - row["timestamp"]) < (ttl_hours * 3600):
+                return dict(row)
+        return None
+
+    async def set_cached_image(self, query: str, image_url: str, provider: str) -> None:
+        """Store image result in cache."""
+        if not query or not image_url:
+            return
+            
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO image_cache (query, image_url, provider, timestamp) VALUES (?, ?, ?, ?)",
+                (query.lower(), image_url, provider, time.time())
+            )
+            await db.commit()
 
     # ── Reads ────────────────────────────────────────────────────────────
 

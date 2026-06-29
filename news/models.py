@@ -75,9 +75,24 @@ class NewsArticle(BaseModel):
     affected_companies: List[str]
     tags:               List[str]
 
-    # Media
-    image_url:    Optional[str] = Field(None,  description="Verified, publicly accessible image URL")
-    image_alt:    Optional[str] = Field(None,  description="Alt text for the image")
+    # Media & Entities
+    primary_entity: Optional[str] = Field(None, description="Main company, person, or organization")
+    entity_type:    Optional[str] = Field(None, description="E.g., Company, Regulatory Body, Person")
+    image_query:    Optional[str] = Field(None, description="High-quality search query for image providers")
+    image_url:      Optional[str] = Field(None, description="Resolved image URL from providers")
+    image_alt:      Optional[str] = Field(None, description="Alt text for the image")
+
+# ─── Image Provider Models ──────────────────────────────────────────────────
+
+class ImageResult(BaseModel):
+    image_url: str
+    thumbnail_url: str
+    provider: str
+    photographer: str
+    photographer_url: str
+    width: int
+    height: int
+    license: str
 
 # ─── API Response wrappers ───────────────────────────────────────────────────
 

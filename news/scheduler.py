@@ -29,6 +29,7 @@ from .config   import (
 from .db               import NewsDB
 from .fetcher          import fetch_all_sources
 from .generator        import generate_news
+from .image_resolver   import ImageResolver
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ class NewsScheduler:
         self._next_run_at   = 0.0
         self._last_run_time: str | None = None
         self._last_fetch_at: str | None = None
+        self.image_resolver = ImageResolver(self._db)
 
     # ── Public interface ─────────────────────────────────────────────────
 
@@ -167,6 +169,15 @@ class NewsScheduler:
         if not articles:
             self._last_run_time = current_ist().isoformat()
             return
+
+        # ── 4.5. Resolve Images Concurrently ──────────────────────────────
+        async def resolve_image(art):
+            result = await self.image_resolver.resolve(art.image_query)
+            if result:
+                art.image_url = result.image_url
+                
+        logger.info("[Scheduler] Resolving images for %d articles...", len(articles))
+        await asyncio.gather(*(resolve_image(a) for a in articles))
 
         # ── 5. Persist ────────────────────────────────────────────────────
         inserted = await self._db.bulk_insert(articles)
