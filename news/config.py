@@ -8,9 +8,15 @@ from __future__ import annotations
 
 import os
 
+# ADD THESE LINES HERE ↓↓↓
 from pathlib import Path
 from dotenv import load_dotenv
-load_dotenv()
+
+ROOT = Path(__file__).resolve().parent.parent
+dotenv_path = ROOT / ".env"
+
+load_dotenv(dotenv_path, override=True)
+# ↑↑↑ END HERE
 
 from datetime import datetime, time
 from enum import Enum
@@ -86,13 +92,29 @@ class NewsConfig:
     # Retention
     retention_hours: int = int(os.getenv("NEWS_RETENTION_HOURS", "24"))
 
-    # Image search
+    # Image search (Legacy Google API, can keep if used elsewhere or remove if fully replaced)
     google_api_key:   str = os.getenv("GOOGLE_API_KEY",   "")
     google_cx:        str = os.getenv("GOOGLE_CX",        "")   # Custom Search Engine ID
 
     # Fetch pipeline
     articles_per_cycle: int = int(os.getenv("NEWS_ARTICLES_PER_CYCLE", "15"))
     request_timeout:    int = int(os.getenv("NEWS_REQUEST_TIMEOUT",    "30"))
+
+    # Image Providers Configuration
+    image_provider_priority: list[str] = [
+        p.strip().lower() 
+        for p in os.getenv("IMAGE_PROVIDER_PRIORITY", "pexels,unsplash,pixabay").split(",")
+        if p.strip()
+    ]
+    
+    pexels_api_key:  str = os.getenv("PEXELS_API_KEY", "")
+    pexels_base_url: str = os.getenv("PEXELS_BASE_URL", "https://api.pexels.com/v1")
+    
+    unsplash_access_key: str = os.getenv("UNSPLASH_ACCESS_KEY", "")
+    unsplash_base_url:   str = os.getenv("UNSPLASH_BASE_URL", "https://api.unsplash.com")
+    
+    pixabay_api_key:  str = os.getenv("PIXABAY_API_KEY", "")
+    pixabay_base_url: str = os.getenv("PIXABAY_BASE_URL", "https://pixabay.com/api")
 
 
 settings = NewsConfig()

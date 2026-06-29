@@ -26,7 +26,9 @@ class ArticleOutput(BaseModel):
     affected_sectors:        list[str]
     affected_companies:      list[str]
     tags:                    list[str]
-    image_url:               str | None
+    primary_entity:          str | None
+    entity_type:             str | None
+    image_query:             str | None
     image_alt:               str | None
 
 
@@ -67,7 +69,27 @@ YOUR TASK:
    - A 2-3 sentence executive summary that hooks the reader
    - A full ~500-word story with sections: Overview, Why It Matters, Market Implications, Impact on Retail Investors, Impact on Institutions, Key Takeaways
    - Accurate classification, sentiment analysis, and impact scoring
-   - Use Google Search grounding to find the best official company logo or representative image for the article. Prefer official websites, unsplash, pexels, or trusted sources. Return a direct image URL (.png, .jpg, .jpeg, .webp) in `image_url`. Return `null` if no suitable image exists. Return `image_alt` describing the image.
+   - Extract the `primary_entity` (e.g., Reliance Industries, SEBI, Nifty 50) and `entity_type` (e.g., Company, Regulator, Bank, Index, Commodity).
+   - Generate ONE concise `image_query` for stock image providers such as Pexels, Unsplash and Pixabay.
+
+IMAGE QUERY RULES:
+- If the article is about a company, return only the official company name.
+  Examples: Infosys, Tata Motors, HDFC Bank, Reliance Industries.
+- If the article is about RBI, return "Reserve Bank of India".
+- If the article is about SEBI, return "Securities and Exchange Board of India".
+- If the article is about NSE, return "National Stock Exchange of India".
+- If the article is about BSE, return "Bombay Stock Exchange".
+- If the article is about an index, return "Nifty 50" or "Sensex".
+- If the article is about a commodity, return its common name.
+  Examples: Gold, Silver, Crude Oil.
+- If there is no specific entity, return a short industry term.
+  Examples: Logistics, Banking, Manufacturing, IPO.
+- Return only a short searchable phrase (1-5 words).
+- Do NOT describe an image.
+- Do NOT generate artistic or AI image prompts.
+- Do NOT return image URLs.
+
+- Generate `image_alt` as a simple description of the expected image.
 
 HEADLINE RULES:
 ✓ Good: "SEBI Tightens IPO Disclosure Norms — What It Means for Retail Investors"
@@ -89,7 +111,7 @@ IMPACT (use exactly one): Low, Medium, High, Critical
 CRITICAL RULES:
 - Return ONLY valid JSON — no markdown, no code fences, no prose outside JSON
 - Do NOT fabricate facts, numbers, or quotes not present in source material
-- Find and return an official logo or representative image URL. Return `null` if none found.
+- Provide a concise `image_query` suitable for stock image providers like Pexels/Unsplash.
 
 SCORING RULES (STRICT)
 
@@ -126,7 +148,9 @@ JSON SCHEMA (return exactly this structure):
       "affected_sectors": ["string"],
       "affected_companies": ["string"],
       "tags": ["string"],
-      "image_url": "https://example.com/logo.png or null",
+      "primary_entity": "string or null",
+      "entity_type": "string or null",
+      "image_query": "string or null",
       "image_alt": "description of the image or null"
     }}
   ]
@@ -197,7 +221,9 @@ Generate {MAX_ARTICLES} high-quality articles following this EXACT JSON schema:
       "affected_sectors": ["string"],
       "affected_companies": ["string"],
       "tags": ["string"],
-      "image_url": "https://example.com/logo.png or null",
+      "primary_entity": "string or null",
+      "entity_type": "string or null",
+      "image_query": "string or null",
       "image_alt": "description of the image or null"
     }}
   ]

@@ -157,7 +157,10 @@ def _dict_to_article(
         affected_sectors     = item.affected_sectors,
         affected_companies   = item.affected_companies,
         tags                 = item.tags,
-        image_url            = item.image_url,
+        primary_entity       = item.primary_entity,
+        entity_type          = item.entity_type,
+        image_query          = item.image_query,
+        image_url            = None,
         image_alt            = item.image_alt,
     )
 
