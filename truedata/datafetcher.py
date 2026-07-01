@@ -12,7 +12,7 @@ PASSWORD = os.getenv("PASSWORD")
 td_obj = TD(USERNAME, PASSWORD, live_port=8084, url='push.truedata.in')
 
 # Subscribe to symbols (use correct TrueData symbol format)
-symbols = ['HINDPETRO']  # Example symbols; replace with actual ones
+symbols = ['HINDPETRO-I']  # Example symbols; replace with actual ones
 req_ids = td_obj.start_live_data(symbols)
 
 time.sleep(2)  # Allow touchline data to populate
