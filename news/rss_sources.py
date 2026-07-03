@@ -31,18 +31,18 @@ class NewsSource:
 # ── Google News RSS (News pipeline) ──────────────────────────────────────────
 # fmt: off
 GOOGLE_NEWS_SOURCES: list[NewsSource] = [
-    # NewsSource("Google News Finance",      1, "https://news.google.com/rss/search?q=(India+OR+Indian)+(NSE+OR+BSE+OR+SEBI+OR+RBI+OR+stock+market+OR+finance+OR+economy)+when:1h&hl=en-IN&gl=IN&ceid=IN:en", "Indian Finance"),
-    # NewsSource("Google News Stock Market", 1, "https://news.google.com/rss/search?q=(NSE+OR+BSE+OR+Sensex+OR+Nifty)+when:1h&hl=en-IN&gl=IN&ceid=IN:en", "Stock Market"),
-    # NewsSource("Google News IPO",          1, "https://news.google.com/rss/search?q=IPO+India+when:1h&hl=en-IN&gl=IN&ceid=IN:en", "IPO"),
-    # NewsSource("Google News SEBI",         1, "https://news.google.com/rss/search?q=SEBI+when:1h&hl=en-IN&gl=IN&ceid=IN:en", "SEBI"),
-    # NewsSource("Google News RBI",          1, "https://news.google.com/rss/search?q=RBI+when:1h&hl=en-IN&gl=IN&ceid=IN:en", "RBI"),
+    NewsSource("Google News Finance",      1, "https://news.google.com/rss/search?q=(India+OR+Indian)+(NSE+OR+BSE+OR+SEBI+OR+RBI+OR+stock+market+OR+finance+OR+economy)+when:1h&hl=en-IN&gl=IN&ceid=IN:en", "Indian Finance"),
+    NewsSource("Google News Stock Market", 1, "https://news.google.com/rss/search?q=(NSE+OR+BSE+OR+Sensex+OR+Nifty)+when:1h&hl=en-IN&gl=IN&ceid=IN:en", "Stock Market"),
+    NewsSource("Google News IPO",          1, "https://news.google.com/rss/search?q=IPO+India+when:1h&hl=en-IN&gl=IN&ceid=IN:en", "IPO"),
+    NewsSource("Google News SEBI",         1, "https://news.google.com/rss/search?q=SEBI+when:1h&hl=en-IN&gl=IN&ceid=IN:en", "SEBI"),
+    NewsSource("Google News RBI",          1, "https://news.google.com/rss/search?q=RBI+when:1h&hl=en-IN&gl=IN&ceid=IN:en", "RBI"),
 ]
 
 # ── Official Intelligence RSS (Official Intelligence pipeline) ────────────────
 OFFICIAL_SOURCES: list[NewsSource] = [
     NewsSource("NSE",  1, "https://nsearchives.nseindia.com/content/RSS/Online_announcements.xml", "NSE"),
-    # NewsSource("BSE",  1, "https://beta.bseindia.com/data/xml/notices.xml",                        "BSE"),
-    # NewsSource("SEBI", 1, "https://www.sebi.gov.in/sebirss.xml",                                   "SEBI"),
+    NewsSource("BSE",  1, "https://beta.bseindia.com/data/xml/notices.xml",                        "BSE"),
+    NewsSource("SEBI", 1, "https://www.sebi.gov.in/sebirss.xml",                                   "SEBI"),
 ]
 # fmt: on
 
