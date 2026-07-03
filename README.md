@@ -1,213 +1,121 @@
-# Stock Market API
+# Basilstar News Engine v2.1
 
-A FastAPI-based REST API that answers stock market queries using Google Generative AI (Gemini).
+Real-time AI-enriched Indian Financial News system.
 
-## Features
-
-- **Stock Market Expertise**: Specialized prompt template for stock market analysis
-- **FastAPI**: Modern, fast web framework with automatic API documentation
-- **Structured Responses**: Well-defined request/response models using Pydantic
-- **Configurable**: Environment-based configuration for easy deployment
-- **Error Handling**: Robust error handling and logging
-- **Documentation**: Automatic Swagger UI at `/docs`
-
-## Project Structure
+## Architecture
 
 ```
-basilstar/
-├── api.py              # Main FastAPI application
-├── prompts.py          # Prompt templates for stock market queries
-├── config.py           # Configuration management
-├── requirements.txt    # Python dependencies
-└── README.md          # This file
+news/
+├── __init__.py          # Package entry-point
+├── config.py            # Settings, thresholds, market schedule logic
+├── models.py            # Pydantic data models
+├── fetcher.py           # Async RSS fetcher (Google News + Official Sources)
+├── generator.py         # Two-Stage Gemini AI enrichment pipeline
+├── image_resolver.py    # Multi-provider image resolver (Wikimedia, Pexels, Unsplash)
+├── prompts.py           # Gemini prompt templates + output schemas
+├── db.py                # Async SQLite persistence (WAL, 24h TTL)
+├── scheduler.py         # Background unified fetch scheduler (5/15/30 min)
+└── api.py               # FastAPI sub-application endpoints
+```
+
+## Pipeline (per cycle)
+
+```
+RSS Fetcher (Google News + NSE/SEBI) 
+         │ (URL Dedup)
+         ▼
+Gemini Stage 1: Market Intelligence Evaluation
+         │ (Scoring: Intraday, Swing, Structural)
+         ▼
+Threshold Filter (High >= 80, Medium >= 50)
+         │ (Discard low-relevance items)
+         ▼
+Gemini Stage 2: Premium Article Generation
+         │ (500-word stories, Sentiment, Time Horizon)
+         ▼
+Image Resolver (Cache → Wikimedia → Pexels → Unsplash)
+         │
+         ▼
+SQLite DB (news_articles & raw_news_items)
+```
+
+## Fetch Schedule
+
+| Market State         | Interval |
+|----------------------|----------|
+| Open (09:00–15:30)   | 5 min    |
+| After-market (–20:00)| 15 min   |
+| Night / Weekend      | 30 min   |
+
+## API Endpoints
+
+| Method | Path            | Description                           |
+|--------|-----------------|---------------------------------------|
+| GET    | `/news/`        | Paginated AI-enriched articles        |
+| GET    | `/news/raw`     | Raw fetched items + Stage 1 scores    |
+| GET    | `/news/status`  | Scheduler health + DB stats           |
+| POST   | `/news/refresh` | Manual trigger (ops/dev)              |
+
+### Query Parameters for `GET /news/` and `GET /news/raw`
+
+| Param                | Example                | Description                          |
+|----------------------|------------------------|--------------------------------------|
+| `page`               | `1`                    | Page number                          |
+| `page_size`          | `20`                   | Items per page (max 100)             |
+| `sentiment`          | `Positive`             | Filter by sentiment                  |
+| `market_impact_level`| `High`                 | Filter by market impact level        |
+| `time_horizon`       | `short_term_catalyst`  | `short_term_catalyst`\|`long_term_structural`\|`both` |
+| `source`             | `NSE`                  | Filter by source (e.g. NSE, SEBI)    |
+| `company`            | `HDFC`                 | Filter by company                    |
+| `sector`             | `Banking`              | Filter by sector                     |
+| `tag`                | `RBI`                  | Filter by tag                        |
+| `search`             | `repo rate`            | Full-text search (only `/news/`)     |
+
+## Environment Variables
+
+```env
+# Required
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-2.5-flash
+
+# Image Resolution Providers
+IMAGE_PROVIDER_PRIORITY=wikimedia,pexels,unsplash
+PEXELS_API_KEY=your_pexels_key
+UNSPLASH_ACCESS_KEY=your_unsplash_key
+
+# Stage 1 Thresholds
+STAGE1_HIGH_THRESHOLD=80
+STAGE1_MEDIUM_THRESHOLD=50
+STAGE1_GENERATE_MEDIUM=true
+
+# Batching (Token Management)
+STAGE1_BATCH_SIZE=15
+STAGE2_BATCH_SIZE=8
+
+# Tuning
+NEWS_DB_PATH=news.db
+NEWS_RETENTION_HOURS=24
+NEWS_INTERVAL_OPEN=300       # 5 min (market open)
+NEWS_INTERVAL_CLOSED=1800    # 30 min (after market)
+NEWS_INTERVAL_NIGHT=3600     # 60 min (night/weekend)
+NEWS_MAX_RETRIES=3
+NEWS_TEMPERATURE=0.0
 ```
 
 ## Setup
 
-### 1. Install Dependencies
-
 ```bash
 pip install -r requirements.txt
+
+# Run
+uvicorn news.api:news_app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 2. Configure Environment
+## Key Design Decisions
 
-
-Edit `.env` and add your API key:
-
-```env
-GEMINI_API_KEY=your_actual_api_key_here
-```
-
-### 3. Run the API
-
-```bash
-python api.py
-```
-
-The API will start at `http://localhost:8000`
-
-## API Usage
-
-### Health Check
-
-**Endpoint**: `GET /`
-
-```bash
-curl http://localhost:8000/
-```
-
-**Response**:
-```json
-{
-  "status": "healthy",
-  "service": "Stock Market API",
-  "model": "gemini-2.0-flash",
-  "available_endpoints": [
-    "GET /market-summary - Get today's market summary",
-    "POST /query - Ask a specific stock market question"
-  ]
-}
-```
-
-### Get Daily Market Summary (NEW!)
-
-**Endpoint**: `GET /market-summary`
-
-This endpoint requires **no parameters** - just hit it and get today's market analysis!
-
-```bash
-curl http://localhost:8000/market-summary
-```
-
-**Response**:
-```json
-{
-  "date": "2026-02-05",
-  "summary": "# Today's Market Summary\n\n## MARKET OVERVIEW\n- S&P 500: ↑ 0.85%...",
-  "model_used": "gemini-2.0-flash",
-  "success": true
-}
-```
-
-The summary includes:
-- **Market Overview**: Major indices performance (S&P 500, Dow Jones, Nasdaq, etc.)
-- **Market Sentiment**: Bullish/bearish sentiment, Fear & Greed Index, key drivers
-- **Sector Highlights**: Top and worst performing sectors
-- **Top Movers**: Top 5 gainers and losers with reasons
-- **Market Commentary**: Expert opinions and outlook
-- **Economic Indicators & News**: Important announcements and earnings
-- **Trading Insights**: Support/resistance levels, technical analysis
-
-### Query Stock Market
-
-**Endpoint**: `POST /query`
-
-For specific stock market questions:
-
-```bash
-curl -X POST "http://localhost:8000/query" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is the current trend of Tesla stock?"}'
-```
-
-**Request Body**:
-```json
-{
-  "query": "What is the current trend of Tesla stock?"
-}
-```
-
-**Response**:
-```json
-{
-  "query": "What is the current trend of Tesla stock?",
-  "answer": "Tesla stock has been...",
-  "model_used": "gemini-2.0-flash",
-  "success": true
-}
-```
-
-### Interactive API Documentation
-
-Visit `http://localhost:8000/docs` in your browser to access the Swagger UI where you can test endpoints interactively.
-
-## Query Examples
-
-**Daily Market Summary** (no parameters needed):
-```bash
-curl http://localhost:8000/market-summary
-```
-
-**Specific Stock Questions**:
-- "What stocks are trending in the tech sector today?"
-- "Analyze the performance of Apple Inc. (AAPL) in the last quarter"
-- "What are the risks involved in investing in cryptocurrency-related stocks?"
-- "Compare Microsoft and Google stock performance"
-- "What sectors are expected to perform well in the coming months?"
-
-## Prompt Template
-
-The API uses a specialized prompt template (`prompts.py`) that instructs the Gemini LLM to:
-
-1. **Reference accurate sources**: Yahoo Finance, Bloomberg, Reuters, CNBC, etc.
-2. **Structure responses** with:
-   - Executive summary
-   - Key facts and developments
-   - Relevant statistics
-   - Risk assessment
-   - Actionable insights
-
-3. **Format requirements**:
-   - Professional language
-   - Stock symbols (AAPL, MSFT, etc.)
-   - Dates for recent events
-   - Bullet points for key info
-   - Price ranges and % changes
-
-4. **Include disclaimers** about financial advice
-
-## Configuration
-
-Edit `config.py` or `.env` to customize:
-
-- `GEMINI_API_KEY`: Your Google Generative AI API key
-- `GEMINI_MODEL`: Model to use (default: "gemini-2.0-flash")
-- `API_PORT`: Port to run the API on (default: 8000)
-- `API_HOST`: Host to bind to (default: 0.0.0.0)
-- `DEBUG`: Enable debug mode (default: False)
-- `MAX_QUERY_LENGTH`: Maximum query length in characters (default: 1000)
-
-## Requirements
-
-- Python 3.8+
-- google-genai
-- fastapi
-- uvicorn
-- pydantic
-- python-dotenv
-
-## Error Handling
-
-The API returns appropriate HTTP status codes:
-
-- `200`: Successful query
-- `422`: Validation error (invalid request)
-- `500`: Server error (GenAI API error, etc.)
-
-## Notes
-
-- This is a demo API. For production use, consider adding:
-  - Authentication/Authorization
-  - Rate limiting
-  - Request/Response caching
-  - Logging to external services
-  - Database for query history
-  - Input sanitization
-- The GenAI responses are based on training data and may not reflect real-time market data
-- Always verify financial information with official sources
-- Consider consulting financial advisors for investment decisions
-
-## License
-
-MIT
+- **Two-Stage Pipeline**: Decouples intelligence evaluation from premium article generation. Stage 1 acts as a data-driven filter scoring items against multiple trading personas.
+- **Threshold-Driven Generation**: Decision logic uses `STAGE1_HIGH_THRESHOLD` and `STAGE1_MEDIUM_THRESHOLD` on `market_relevance_score` to determine article generation (replacing legacy LLM booleans).
+- **Robust JSON Healing**: Uses `json-repair` to dynamically recover broken Gemini JSON outputs (unescaped chars, missing colons) avoiding pipeline crashes.
+- **Deduplication**: URL-hash based UIDs persist in `raw_news_items`, bypassing erratic or static timestamps published by official exchange RSS feeds. 
+- **Image Fallback Chain**: High-performance image discovery prioritizing keyless open-source providers (Wikimedia) before falling back to quota-limited premium APIs (Pexels, Unsplash).
+- **Date parsing**: Uses `python-dateutil` to handle dozens of non-standard date formats emitted by varied Indian regulatory feeds.

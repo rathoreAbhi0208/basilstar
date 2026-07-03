@@ -1,55 +1,212 @@
 """
 news/scheduler.py
 -----------------
-Background task scheduler for the News pipeline.
+Single background scheduler — one unified pipeline for ALL sources.
 
-Each cycle:
-  1. Fetch fresh articles from all RSS sources (fetcher.py).
-  2. Enrich via Gemini AI (generator.py).
-  3. Resolve images for each article (image_resolver.py).
-  4. Persist to SQLite, skipping duplicates (db.py).
-  5. Prune articles older than 24 h.
-  6. Sleep until next interval (5 min market open, 15 min after, 30 min night).
+Architecture
+~~~~~~~~~~~~
+    NewsScheduler
+        │
+        └── NewsPipeline   (Google News + NSE/BSE/SEBI RSS → two-stage AI → news_articles)
+                Stage 1: Market Intelligence Evaluation (with Google Search grounding)
+                Filter:  Score-based threshold filtering  (configurable thresholds)
+                Stage 2: Premium Article Generation      (with Google Search grounding)
 
-Circuit breaker: exponential back-off with max_retries before giving up a cycle.
+All sources — Google News RSS AND official exchange/regulator feeds (NSE, BSE, SEBI) —
+are evaluated and generated through the SAME two-stage pipeline. There is no separate
+OfficialPipeline. Every article, regardless of origin, ends up in the news_articles table.
+
+Adding a future pipeline source:
+    1. Add new NewsSource entries to rss_sources.py.
+    2. Append the source list to ALL_SOURCES in this file.
+    Nothing else changes.
+
+Shared infrastructure
+~~~~~~~~~~~~~~~~~~~~~
+    • fetch_sources()   — generic RSS fetcher
+    • generate_news()   — two-stage Gemini pipeline
+    • ImageResolver     — same instance, same DB
+    • NewsDB            — same SQLite connection
+    • Retry logic       — exponential back-off in _run_cycle()
+    • Logging           — structured, consistent prefixes
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone, timedelta
+from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 
 from google import genai
 
-from .config   import (
-    settings, MarketState,
-    get_fetch_interval_seconds, get_market_state, current_ist,
-)
-from .db               import NewsDB
-from .fetcher          import fetch_all_sources
-from .generator        import generate_news
-from .image_resolver   import ImageResolver
+from .config         import settings, get_fetch_interval_seconds, get_market_state, current_ist
+from .db             import NewsDB
+from .fetcher        import fetch_sources
+from .generator      import generate_news
+from .image_resolver import ImageResolver
+from .models         import NewsArticle
+from .rss_sources    import GOOGLE_NEWS_SOURCES, OFFICIAL_SOURCES
 
 logger = logging.getLogger(__name__)
 
+# All RSS sources — Google News + official exchange/regulator feeds — unified.
+ALL_SOURCES = GOOGLE_NEWS_SOURCES + OFFICIAL_SOURCES
+
+
+# ─── Pipeline abstraction ────────────────────────────────────────────────────
+
+class BasePipeline(ABC):
+    """Base class for a content pipeline."""
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        ...
+
+    @abstractmethod
+    async def run(
+        self,
+        db:             NewsDB,
+        gemini_client:  genai.Client,
+        gemini_model:   str,
+        image_resolver: ImageResolver,
+        last_run_time:  str | None,
+    ) -> int:
+        ...
+
+
+# ─── Unified News Pipeline ───────────────────────────────────────────────────
+
+class NewsPipeline(BasePipeline):
+    """
+    Unified pipeline: ALL RSS sources → two-stage AI → news_articles.
+
+    Sources: GOOGLE_NEWS_SOURCES + OFFICIAL_SOURCES (combined as ALL_SOURCES)
+
+    Every item — whether from Google News, NSE, BSE, or SEBI — is evaluated
+    by Stage 1 (Market Intelligence Evaluation), filtered by relevance score,
+    and then written as a full NewsArticle by Stage 2 (Premium Article Generation).
+
+    No separate pipeline or table exists for official sources.
+    """
+
+    def __init__(self) -> None:
+        self._last_stage1_evaluated: int = 0
+        self._last_stage1_passed:    int = 0
+        self._last_stage2_generated: int = 0
+
+    @property
+    def name(self) -> str:
+        return "news"
+
+    @property
+    def last_stats(self) -> dict[str, int]:
+        return {
+            "stage1_evaluated": self._last_stage1_evaluated,
+            "stage1_passed":    self._last_stage1_passed,
+            "stage2_generated": self._last_stage2_generated,
+        }
+
+    async def run(
+        self,
+        db:             NewsDB,
+        gemini_client:  genai.Client,
+        gemini_model:   str,
+        image_resolver: ImageResolver,
+        last_run_time:  str | None,
+    ) -> int:
+        # ── 1. Seen UIDs for dedup (URL-hash from raw_news_items) ────────
+        existing_uids = await db.get_raw_existing_uids()
+        logger.debug("[NewsPipeline] %d UIDs in dedup set", len(existing_uids))
+
+        # ── 2. Fetch from ALL sources concurrently ────────────────────────
+        raw_items = await fetch_sources(
+            ALL_SOURCES, existing_uids=existing_uids
+        )
+        logger.info(
+            "[NewsPipeline] Fetched %d new raw items from %d sources",
+            len(raw_items), len(ALL_SOURCES),
+        )
+
+        # ── 4. Two-stage generation ───────────────────────────────────────
+        articles, stats, evaluated_all = await generate_news(
+            client        = gemini_client,
+            model_name    = gemini_model,
+            raw_items     = raw_items if raw_items else None,
+            last_run_time = last_run_time,
+        )
+
+        if evaluated_all:
+            await db.bulk_insert_raw_items(evaluated_all)
+
+        # Store stats for status endpoint
+        self._last_stage1_evaluated = stats.get("stage1_evaluated", 0)
+        self._last_stage1_passed    = stats.get("stage1_passed",    0)
+        self._last_stage2_generated = stats.get("stage2_generated", 0)
+
+        logger.info(
+            "[NewsPipeline] Stage1: evaluated=%d passed=%d | Stage2: generated=%d",
+            self._last_stage1_evaluated,
+            self._last_stage1_passed,
+            self._last_stage2_generated,
+        )
+
+        if not articles:
+            return 0
+
+        # ── 5. Resolve images concurrently ────────────────────────────────
+        await _resolve_images(articles, image_resolver)
+
+        # ── 6. Persist ────────────────────────────────────────────────────
+        return await db.bulk_insert(articles)
+
+
+# ─── Shared helpers ──────────────────────────────────────────────────────────
+
+
+async def _resolve_images(records: list, image_resolver: ImageResolver) -> None:
+    """Resolve images for a list of articles in parallel."""
+    async def _resolve_one(rec) -> None:
+        result = await image_resolver.resolve(getattr(rec, "image_query", None))
+        if result:
+            rec.image_url = result.image_url
+
+    await asyncio.gather(*(_resolve_one(r) for r in records))
+
+
+# ─── Scheduler ───────────────────────────────────────────────────────────────
 
 class NewsScheduler:
+    """
+    Single scheduler that runs the unified NewsPipeline each cycle.
+
+    Args:
+        db:            Shared NewsDB instance.
+        gemini_client: Shared genai.Client.
+        gemini_model:  Model name string.
+        pipelines:     Pipeline list. Defaults to [NewsPipeline()].
+                       Pass a custom list only for testing/overrides.
+    """
+
     def __init__(
         self,
         db:            NewsDB,
         gemini_client: genai.Client,
         gemini_model:  str,
+        pipelines:     list[BasePipeline] | None = None,
     ) -> None:
-        self._db            = db
-        self._gemini_client = gemini_client
-        self._gemini_model  = gemini_model
-        self._task: asyncio.Task | None = None
-        self._running       = False
-        self._next_run_at   = 0.0
+        self._db             = db
+        self._gemini_client  = gemini_client
+        self._gemini_model   = gemini_model
+        self._news_pipeline  = NewsPipeline()
+        self._pipelines      = pipelines or [self._news_pipeline]
+        self._task:          asyncio.Task | None = None
+        self._running        = False
+        self._next_run_at    = 0.0
         self._last_run_time: str | None = None
         self._last_fetch_at: str | None = None
-        self.image_resolver = ImageResolver(self._db)
+        self._image_resolver = ImageResolver(self._db)
 
     # ── Public interface ─────────────────────────────────────────────────
 
@@ -57,9 +214,11 @@ class NewsScheduler:
         if self._running:
             return
         self._running = True
-        # Kick off immediately on startup
-        self._task = asyncio.create_task(self._loop(), name="news_scheduler")
-        logger.info("[Scheduler] Started")
+        self._task    = asyncio.create_task(self._loop(), name="news_scheduler")
+        logger.info(
+            "[Scheduler] Started | sources=%d | pipelines=%s",
+            len(ALL_SOURCES), self.pipeline_names,
+        )
 
     async def stop(self) -> None:
         self._running = False
@@ -75,6 +234,10 @@ class NewsScheduler:
     def is_running(self) -> bool:
         return self._running and self._task is not None and not self._task.done()
 
+    @property
+    def pipeline_names(self) -> list[str]:
+        return [p.name for p in self._pipelines]
+
     def next_fetch_in_seconds(self) -> int | None:
         if not self.is_running:
             return None
@@ -84,6 +247,14 @@ class NewsScheduler:
     def last_fetch_at(self) -> str | None:
         return self._last_fetch_at
 
+    @property
+    def last_pipeline_stats(self) -> dict[str, int]:
+        """Return Stage 1/2 stats from the most recent NewsPipeline run."""
+        for p in self._pipelines:
+            if isinstance(p, NewsPipeline):
+                return p.last_stats
+        return {}
+
     # ── Internal loop ────────────────────────────────────────────────────
 
     async def _loop(self) -> None:
@@ -91,7 +262,7 @@ class NewsScheduler:
             state    = get_market_state()
             interval = get_fetch_interval_seconds(state)
 
-            logger.info("[Scheduler] Poll cycle started")
+            logger.info("[Scheduler] Poll cycle started (market=%s)", state.value)
             cycle_start = time.time()
 
             try:
@@ -99,89 +270,60 @@ class NewsScheduler:
             except Exception as exc:
                 logger.exception("[Scheduler] Poll cycle failed: %s", exc)
 
+            # Prune expired articles
             try:
                 await self._db.prune_expired()
             except Exception as exc:
                 logger.exception("[Scheduler] Prune failed: %s", exc)
 
-            cycle_elapsed = time.time() - cycle_start
+            cycle_elapsed     = time.time() - cycle_start
             self._next_run_at = time.time() + max(1, interval - int(cycle_elapsed))
-            sleep_for = max(1, int(self._next_run_at - time.time()))
+            sleep_for         = max(1, int(self._next_run_at - time.time()))
 
-            logger.info("[Scheduler] Poll cycle completed in %.1fs", cycle_elapsed)
-            logger.info("[Scheduler] Next poll in %d seconds", sleep_for)
-
+            logger.info("[Scheduler] Cycle done in %.1fs, next in %ds", cycle_elapsed, sleep_for)
             try:
                 await asyncio.sleep(sleep_for)
             except asyncio.CancelledError:
                 break
 
     async def _run_cycle(self) -> None:
-        """One complete fetch → enrich → image → persist cycle."""
+        """Run all pipelines with exponential back-off retry per pipeline."""
         max_retries = settings.max_retries
 
-        for attempt in range(1, max_retries + 1):
-            try:
-                await self._do_fetch_and_store()
-                return
-            except Exception as exc:
-                logger.warning(
-                    "[Scheduler] Attempt %d/%d failed: %s",
-                    attempt, max_retries, exc,
-                )
-                if attempt < max_retries:
-                    await asyncio.sleep(2 ** attempt)
-                else:
-                    logger.error("[Scheduler] All %d attempts failed", max_retries)
+        for pipeline in self._pipelines:
+            logger.info("[Scheduler] Running pipeline: %s", pipeline.name)
+            for attempt in range(1, max_retries + 1):
+                try:
+                    inserted = await pipeline.run(
+                        db             = self._db,
+                        gemini_client  = self._gemini_client,
+                        gemini_model   = self._gemini_model,
+                        image_resolver = self._image_resolver,
+                        last_run_time  = self._last_run_time,
+                    )
+                    logger.info(
+                        "[Scheduler] Pipeline '%s' inserted %d records",
+                        pipeline.name, inserted,
+                    )
+                    break
+                except Exception as exc:
+                    logger.warning(
+                        "[Scheduler] Pipeline '%s' attempt %d/%d failed: %s",
+                        pipeline.name, attempt, max_retries, exc,
+                    )
+                    if attempt < max_retries:
+                        await asyncio.sleep(2 ** attempt)
+                    else:
+                        logger.error(
+                            "[Scheduler] Pipeline '%s' gave up after %d attempts",
+                            pipeline.name, max_retries,
+                        )
 
-    async def _do_fetch_and_store(self) -> None:
-        """Core work: fetch → generate → image → save."""
-
-        # ── 1. Get existing UIDs (for dedup) ─────────────────────────────
-        existing_uids = await self._db.get_existing_uids()
-
-        # ── 2. Compute "since" window ─────────────────────────────────────
-        since = None
-        if self._last_run_time:
-            try:
-                since = datetime.fromisoformat(self._last_run_time).replace(
-                    tzinfo=timezone.utc
-                )
-                # small buffer: go back 5 extra minutes to avoid missing items
-                since = since - timedelta(minutes=5)
-            except Exception:
-                since = None
-
-        # ── 3. Fetch from RSS sources ─────────────────────────────────────
-        raw_items = await fetch_all_sources(
-            since         = since,
-            existing_uids = existing_uids,
-        )
-
-        # ── 4. Generate enriched articles via Gemini ──────────────────────
-        articles = await generate_news(
-            client        = self._gemini_client,
-            model_name    = self._gemini_model,
-            raw_items     = raw_items if raw_items else None,
-            last_run_time = self._last_run_time,
-        )
-
-        if not articles:
-            self._last_run_time = current_ist().isoformat()
-            return
-
-        # ── 4.5. Resolve Images Concurrently ──────────────────────────────
-        async def resolve_image(art):
-            result = await self.image_resolver.resolve(art.image_query)
-            if result:
-                art.image_url = result.image_url
-                
-        logger.info("[Scheduler] Resolving images for %d articles...", len(articles))
-        await asyncio.gather(*(resolve_image(a) for a in articles))
-
-        # ── 5. Persist ────────────────────────────────────────────────────
-        inserted = await self._db.bulk_insert(articles)
-
-        # ── 6. Update timestamps ──────────────────────────────────────────
         self._last_run_time = current_ist().isoformat()
         self._last_fetch_at = current_ist().strftime("%Y-%m-%d %H:%M:%S IST")
+
+    # ── Compatibility shim ───────────────────────────────────────────────
+
+    async def _do_fetch_and_store(self) -> None:
+        """Public shim for the manual /refresh endpoint."""
+        await self._run_cycle()

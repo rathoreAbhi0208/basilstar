@@ -1,6 +1,11 @@
 """
-news — Real-time AI-enriched Indian Financial News package.
-"""
-from .news_api import news_app
+news — Real-time AI-enriched Indian Financial Intelligence package.
 
-__all__ = ["news_app"]
+Exports
+~~~~~~~
+    router   The single FastAPI APIRouter serving:
+                   /news              — News pipeline
+"""
+from .api import router, init_news_module, close_news_module
+
+__all__ = ["router", "init_news_module", "close_news_module"]
