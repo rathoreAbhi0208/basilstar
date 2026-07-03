@@ -9,11 +9,12 @@ from __future__ import annotations
 import logging
 import urllib.parse
 from typing import Protocol, Optional
+import json
 
 import httpx
 
 from .config import settings
-from .models import ImageResult, NewsArticle
+from .models import ImageResult
 from .db import NewsDB
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,94 @@ class ImageProvider(Protocol):
     def name(self) -> str: ...
     
     async def search(self, query: str) -> ImageResult | None: ...
+
+
+class WikimediaCommonsProvider:
+    @property
+    def name(self) -> str:
+        return "Wikimedia"
+
+    async def search(self, query: str) -> ImageResult | None:
+        url = "https://commons.wikimedia.org/w/api.php"
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "application/xml,text/xml,*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        params = {
+            "action": "query",
+            "format": "json",
+            "prop": "imageinfo",
+            "iiprop": "url|size|mime",
+            "generator": "search",
+            "gsrnamespace": 6,
+            "gsrlimit": 10,
+            "gsrsearch": query
+        }
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=headers, params=params, timeout=10.0)
+            resp.raise_for_status()
+            data = resp.json()
+            
+            pages = data.get("query", {}).get("pages", {})
+            if not pages:
+                return None
+                
+            results = []
+            for page in pages.values():
+                imageinfo = page.get("imageinfo")
+                if not imageinfo:
+                    continue
+                info = imageinfo[0]
+                
+                width = info.get("width", 0)
+                height = info.get("height", 0)
+                mime = info.get("mime", "")
+                img_url = info.get("url", "")
+                
+                if width < 300 or height < 300:
+                    continue
+                if not img_url:
+                    continue
+                if "image" not in mime:
+                    continue
+                    
+                if "deleted" in img_url.lower():
+                    continue
+
+                score = 0
+                if "svg" not in mime.lower():
+                    score += 10
+                if width > height:
+                    score += 5
+                    
+                results.append((score, width * height, {
+                    "url": img_url,
+                    "width": width,
+                    "height": height,
+                    "descriptionurl": info.get("descriptionurl", "")
+                }))
+                
+            if not results:
+                return None
+                
+            results.sort(key=lambda x: (x[0], x[1]), reverse=True)
+            best = results[0][2]
+            
+            return ImageResult(
+                image_url=best["url"],
+                thumbnail_url=best["url"],
+                provider=self.name,
+                photographer="Wikimedia Commons",
+                photographer_url=best["descriptionurl"],
+                width=best["width"],
+                height=best["height"],
+                license="Public Domain / CC"
+            )
 
 
 class PexelsProvider:
@@ -100,50 +189,6 @@ class UnsplashProvider:
                 license="Unsplash License"
             )
 
-
-class PixabayProvider:
-    def __init__(self) -> None:
-        self.api_key = settings.pixabay_api_key
-        self.base_url = settings.pixabay_base_url
-        
-    @property
-    def name(self) -> str:
-        return "Pixabay"
-
-    async def search(self, query: str) -> ImageResult | None:
-        if not self.api_key:
-            return None
-            
-        url = self.base_url
-        params = {
-            "key": self.api_key,
-            "q": urllib.parse.quote(query),
-            "image_type": "photo",
-            "orientation": "horizontal",
-            "per_page": 3
-        }
-        
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, params=params, timeout=10.0)
-            resp.raise_for_status()
-            data = resp.json()
-            
-            if not data.get("hits"):
-                return None
-                
-            photo = data["hits"][0]
-            return ImageResult(
-                image_url=photo.get("largeImageURL", photo.get("webformatURL", "")),
-                thumbnail_url=photo.get("previewURL", ""),
-                provider=self.name,
-                photographer=photo.get("user", "Unknown"),
-                photographer_url=f"https://pixabay.com/users/{photo.get('user_id', '')}",
-                width=photo.get("imageWidth", 0),
-                height=photo.get("imageHeight", 0),
-                license="Pixabay License"
-            )
-
-
 class ImageResolver:
     def __init__(self, db: NewsDB) -> None:
         self.db = db
@@ -151,9 +196,9 @@ class ImageResolver:
         
         # Initialize providers based on config priority
         provider_map = {
+            "wikimedia": WikimediaCommonsProvider,
             "pexels": PexelsProvider,
             "unsplash": UnsplashProvider,
-            "pixabay": PixabayProvider
         }
         
         for p_name in settings.image_provider_priority:
@@ -200,7 +245,17 @@ class ImageResolver:
                     return result
                 else:
                     logger.info("[%s] No results", provider.name)
+            except httpx.TimeoutException as e:
+                logger.warning("[%s] Timeout: %s", provider.name, e)
+            except httpx.HTTPStatusError as e:
+                logger.warning("[%s] HTTPStatusError: %s", provider.name, e)
+            except json.JSONDecodeError as e:
+                logger.warning("[%s] JSONDecodeError: %s", provider.name, e)
+            except httpx.NetworkError as e:
+                logger.warning("[%s] NetworkError: %s", provider.name, e)
+            except ConnectionError as e:
+                logger.warning("[%s] ConnectionError: %s", provider.name, e)
             except Exception as e:
-                logger.warning("[%s] Error: %s", provider.name, e)
+                logger.warning("[%s] Unexpected error: %s", provider.name, e)
                 
         return None

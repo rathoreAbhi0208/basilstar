@@ -1,24 +1,47 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
 import logging
 import json
 from datetime import datetime
-from config import GEMINI_API_KEY, GEMINI_MODEL
+from config import GEMINI_API_KEY, GEMINI_MODEL, ALLOWED_ORIGINS
 from prompts import get_daily_market_summary_prompt
+
+from news.api import router as news_router, init_news_module, close_news_module
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize news module components
+    await init_news_module(app)
+    yield
+    # Cleanup news module components
+    await close_news_module(app)
 
 # Initialize FastAPI app
 app = FastAPI(
     title="Stock Market API",
     description="API to get daily market summary using Google Generative AI",
     version="1.0.0",
-    docs_url="/api/docs"
+    docs_url="/api/docs",
+    lifespan=lifespan
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(news_router)
 
 # Initialize GenAI client
 if not GEMINI_API_KEY:

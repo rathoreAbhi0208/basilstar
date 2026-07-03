@@ -3,20 +3,21 @@ news/config.py
 --------------
 Central configuration for the News package.
 All tunable knobs live here — no magic strings scattered across files.
+
+Two-stage AI pipeline settings
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  • STAGE 1 thresholds control which items advance to Stage 2 article generation.
+  • Both stages share the same Gemini client but may use different model configs.
 """
 from __future__ import annotations
 
 import os
-
-# ADD THESE LINES HERE ↓↓↓
 from pathlib import Path
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
 dotenv_path = ROOT / ".env"
-
 load_dotenv(dotenv_path, override=True)
-# ↑↑↑ END HERE
 
 from datetime import datetime, time
 from enum import Enum
@@ -31,9 +32,9 @@ _MARKET_CLOSE = time(15, 30)
 _EVENING_END  = time(20, 0)
 
 # ─── Fetch Intervals (seconds) ───────────────────────────────────────────────
-INTERVAL_MARKET_OPEN   = int(os.getenv("NEWS_INTERVAL_OPEN",    "300"))   # 5 min
-INTERVAL_MARKET_CLOSED = int(os.getenv("NEWS_INTERVAL_CLOSED",  "900"))   # 15 min
-INTERVAL_NIGHT         = int(os.getenv("NEWS_INTERVAL_NIGHT",  "1800"))   # 30 min
+INTERVAL_MARKET_OPEN   = int(os.getenv("NEWS_INTERVAL_OPEN",    "900"))   # 15 min
+INTERVAL_MARKET_CLOSED = int(os.getenv("NEWS_INTERVAL_CLOSED",  "1800"))   # 30 min
+INTERVAL_NIGHT         = int(os.getenv("NEWS_INTERVAL_NIGHT",  "3600"))   # 1 hour
 
 
 class MarketState(str, Enum):
@@ -79,42 +80,49 @@ def current_ist() -> datetime:
 
 # ─── News Settings ───────────────────────────────────────────────────────────
 class NewsConfig:
-    # Gemini
-    gemini_api_key: str  = os.getenv("GEMINI_API_KEY", "")
-    gemini_model:   str  = os.getenv("GEMINI_MODEL",   "gemini-2.5-flash")
+    # ── Gemini ───────────────────────────────────────────────────────────────
+    gemini_api_key: str   = os.getenv("GEMINI_API_KEY", "")
+    gemini_model:   str   = os.getenv("GEMINI_MODEL",   "gemini-2.5-flash")
     temperature:    float = float(os.getenv("NEWS_TEMPERATURE", "0.0"))
     top_p:          float = float(os.getenv("NEWS_TOP_P",       "0.95"))
     max_retries:    int   = int(os.getenv("NEWS_MAX_RETRIES",   "3"))
 
-    # Database
+    # ── Database ─────────────────────────────────────────────────────────────
     db_path: str = os.getenv("NEWS_DB_PATH", "news.db")
 
-    # Retention
+    # ── Retention ────────────────────────────────────────────────────────────
     retention_hours: int = int(os.getenv("NEWS_RETENTION_HOURS", "24"))
 
-    # Image search (Legacy Google API, can keep if used elsewhere or remove if fully replaced)
-    google_api_key:   str = os.getenv("GOOGLE_API_KEY",   "")
-    google_cx:        str = os.getenv("GOOGLE_CX",        "")   # Custom Search Engine ID
+    # ── Image search (legacy, kept for compatibility) ─────────────────────────
+    google_api_key: str = os.getenv("GOOGLE_API_KEY", "")
+    google_cx:      str = os.getenv("GOOGLE_CX",      "")
 
-    # Fetch pipeline
+    # ── Fetch pipeline ───────────────────────────────────────────────────────
     articles_per_cycle: int = int(os.getenv("NEWS_ARTICLES_PER_CYCLE", "15"))
     request_timeout:    int = int(os.getenv("NEWS_REQUEST_TIMEOUT",    "30"))
 
-    # Image Providers Configuration
+    # ── Image Providers Configuration ────────────────────────────────────────
     image_provider_priority: list[str] = [
-        p.strip().lower() 
-        for p in os.getenv("IMAGE_PROVIDER_PRIORITY", "pexels,unsplash,pixabay").split(",")
+        p.strip().lower()
+        for p in os.getenv("IMAGE_PROVIDER_PRIORITY", "wikimedia,pexels,unsplash,pixabay").split(",")
         if p.strip()
     ]
-    
+
     pexels_api_key:  str = os.getenv("PEXELS_API_KEY", "")
     pexels_base_url: str = os.getenv("PEXELS_BASE_URL", "https://api.pexels.com/v1")
-    
+
     unsplash_access_key: str = os.getenv("UNSPLASH_ACCESS_KEY", "")
     unsplash_base_url:   str = os.getenv("UNSPLASH_BASE_URL", "https://api.unsplash.com")
-    
-    pixabay_api_key:  str = os.getenv("PIXABAY_API_KEY", "")
-    pixabay_base_url: str = os.getenv("PIXABAY_BASE_URL", "https://pixabay.com/api")
+
+
+    # ── Two-Stage Pipeline: Stage 1 Filtering Thresholds ────────────────────
+    stage1_high_threshold:   int  = int(os.getenv("STAGE1_HIGH_THRESHOLD",   "80"))
+    stage1_medium_threshold: int  = int(os.getenv("STAGE1_MEDIUM_THRESHOLD", "50"))
+    stage1_generate_medium:  bool = os.getenv("STAGE1_GENERATE_MEDIUM", "true").lower() == "true"
+
+    # Batch sizes for each stage (token budget management)
+    stage1_batch_size: int = int(os.getenv("STAGE1_BATCH_SIZE", "15"))
+    stage2_batch_size: int = int(os.getenv("STAGE2_BATCH_SIZE", "8"))
 
 
 settings = NewsConfig()

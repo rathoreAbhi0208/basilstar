@@ -11,6 +11,10 @@ load_dotenv()
 API_PORT = int(os.getenv("API_PORT", 8000))
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS", 
+    "http://localhost:3000"
+).split(",")
 
 # GenAI Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
