@@ -8,7 +8,7 @@ kite = KiteConnect(api_key=os.getenv("ZAPI-KEY"))
 acc = os.getenv("ZAPI-ACCESS-TOKEN")
 print("Access Token:", acc)
 
-kite.set_access_token(".......")
+kite.set_access_token(acc)
 
 
 

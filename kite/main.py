@@ -7,12 +7,15 @@ import time
 import threading
 import pandas as pd
 from datetime import datetime
-from data import kite
+from kite_login import kite
 
 
 from dotenv import load_dotenv
 import sys
-sys.path.append("/Users/abhi/code/basilstar/truedata")  # Adjust this path as needed to import from truedata
+
+curr_dir = os.path.dirname(os.path.abspath(__file__))
+truedata_dir = os.path.join(curr_dir, "../truedata")
+sys.path.insert(0,truedata_dir)
 
 from alerts import AlertManager
 from indicators import compute_indicators, get_reference_values
