@@ -1,7 +1,3 @@
-# Nifty 200 constituent symbols in TrueData F&O format (append -I for continuous futures)
-# Source: NSE Nifty 200 index constituents
-# Update this list periodically as index composition changes
-
 NIFTY200_SYMBOLS = [
 
     # Nifty 50
