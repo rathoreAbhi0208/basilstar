@@ -1,5 +1,3 @@
-Bearish Setup Conditions
-
 5-minute ADX (14) is greater than 30
 Current 5-minute Low is lower than the first 5-minute Low.
 5-minute Close is less than or equal to the lowest Low of the last 18 candles.

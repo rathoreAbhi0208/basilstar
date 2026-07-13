@@ -1,25 +1,24 @@
 from kiteconnect import KiteConnect
 import os
 import pandas as pd
+# pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
 import datetime
+# pyrefly: ignore [missing-import]
 import talib
 
 load_dotenv()
 import sys
 
-curr_dir = os.path.dirname(os.path.abspath(__file__))
-truedata_dir = os.path.join(curr_dir, "../")
-sys.path.insert(0,truedata_dir)
 
 from patterns import _find_peaks, _find_troughs, detect_double_top, detect_double_bottom, detect_head_shoulders, find_pivot_highs
 
 
-ACCESS_TOKEN = os.getenv("ZAPI-ACCESS-TOKEN")
-API_KEY = os.getenv("ZAPI-KEY")
+ACCESS_TOKEN = os.getenv("KITE_ACCESS_TOKEN")
+API_KEY = os.getenv("KITE_API_KEY")
 
 if not API_KEY:
-    raise ValueError("ZAPI-KEY not found in environment variables. Please set it in your .env file.")
+    raise ValueError("KITE_API_KEY not found in environment variables. Please set it in your .env file.")
 
 
 kite = KiteConnect(api_key=API_KEY)
@@ -72,6 +71,7 @@ def get_instrument_token(symbol: str) -> str:
         raise ValueError(f"Instrument token for {symbol} not found.")
     except Exception as e:
         print(f"Error fetching instrument token: {e}")
+        # pyrefly: ignore [bad-return]
         return None
 
 def get_candlestick_data(symbol: str, days=90, interval: str = "15minute") -> pd.DataFrame:
@@ -82,8 +82,8 @@ def get_candlestick_data(symbol: str, days=90, interval: str = "15minute") -> pd
         
 
     # to_date = datetime.datetime.now().strftime("%Y-%m-%d")
-    to_date = (datetime.datetime.now() - datetime.timedelta(days=90)).strftime("%Y-%m-%d")  # 180 days back
-    from_date = (datetime.datetime.now() - datetime.timedelta(days=270)).strftime("%Y-%m-%d")
+    to_date = (datetime.datetime.now() - datetime.timedelta(days=60)).strftime("%Y-%m-%d")  # 180 days back
+    from_date = (datetime.datetime.now() - datetime.timedelta(days=180)).strftime("%Y-%m-%d")
 
     df = get_historical_data(kite, token, "2025-12-01", "2026-06-30", interval)
     return pd.DataFrame(df)
@@ -96,11 +96,11 @@ if __name__ == "__main__":
     print(f"Instrument Token for TOLINS: {instrument_token}")
     # df = get_historical_data(kite, instrument_token, "2025-08-01", "2025-12-31")
     # print(df.head())
-    df = get_candlestick_data("BANKINDIA", days=90, interval="day")
+    df = get_candlestick_data("SBIN", days=90, interval="day")
     print(f"Got {len(df)} rows of candlestick data for TOLINS.")
 
 
-    result_double_top = detect_head_shoulders(df)
+    result_double_top = detect_double_top(df)
     print(f"Double Top Detection Result: {result_double_top}")
 
     # peaks = find_pivot_highs(df)

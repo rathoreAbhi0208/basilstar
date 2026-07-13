@@ -1,5 +1,3 @@
-Bullish Setup Conditions
-
 5-minute ADX (14) is greater than 30
 5 min close greater than last 4 days close
 Current 5-minute High is higher than first 5-minute High.

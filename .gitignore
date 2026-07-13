@@ -25,5 +25,5 @@ build/
 .env*
 local_settings.py
 local.py
-
+txt.txt
 venv
