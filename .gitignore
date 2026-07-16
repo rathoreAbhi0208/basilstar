@@ -28,3 +28,4 @@ local.py
 txt.txt
 venv
 news.db
+*.db
