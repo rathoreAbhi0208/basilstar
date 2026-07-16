@@ -27,3 +27,4 @@ local_settings.py
 local.py
 txt.txt
 venv
+news.db

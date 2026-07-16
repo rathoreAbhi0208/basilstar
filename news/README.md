@@ -1,4 +1,4 @@
-# Basilstar News Package v2.0
+# Basilstar News Engine v3.0.0
 
 Real-time AI-enriched Indian Financial News system.
 
@@ -7,60 +7,79 @@ Real-time AI-enriched Indian Financial News system.
 ```
 news/
 ├── __init__.py          # Package entry-point
-├── config.py            # All settings, market schedule logic
+├── config.py            # Settings, thresholds, market schedule logic
 ├── models.py            # Pydantic data models
-├── fetcher.py           # Async RSS fetcher (18 Tier-1 + Tier-2 sources)
-├── generator.py         # Gemini AI enrichment pipeline
-├── image_resolver.py    # Image URL resolver (Google CSE → Wikimedia → fallback)
+├── fetcher.py           # Async RSS fetcher (Google News + Official Sources)
+├── generator.py         # Two-Stage Gemini AI enrichment pipeline
+├── image_resolver.py    # Multi-provider image resolver (Wikimedia, Pexels, Unsplash)
 ├── prompts.py           # Gemini prompt templates + output schemas
 ├── db.py                # Async SQLite persistence (WAL, 24h TTL)
-├── scheduler.py         # Background fetch scheduler (5/15/30 min)
-└── news_api.py          # FastAPI sub-application
+├── scheduler.py         # Background unified fetch scheduler (15/30/60 min)
+├── api.py               # FastAPI sub-application endpoints
+└── earnings/            # Dedicated earnings pipeline module
+    ├── __init__.py      # Package entry-point
+    ├── generator.py     # Earnings data collection and gap-fill logic
+    ├── models.py        # Earnings-specific Pydantic data models
+    └── prompts.py       # Earnings-specific prompt templates
 ```
 
 ## Pipeline (per cycle)
 
 ```
-RSS Fetcher (18 sources) → Gemini Enrichment → Image Resolver → SQLite DB
-     │                           │                    │
-     │  Tier-1: NSE/BSE/SEBI     │  500-word stories  │  Google CSE
-     │  Tier-2: ET/MC/Mint...    │  Sentiment/Impact  │  Wikimedia
-     │                           │  Tags/Keywords     │  Static fallbacks
-     └─── deduplicated by URL ───┘                    └── HEAD-verified URLs
+RSS Fetcher (Google News + NSE/SEBI) 
+         │ (URL Dedup)
+         ▼
+Gemini Stage 1: Market Intelligence Evaluation
+         │ (Scoring: Intraday, Swing, Structural, Classification)
+         ├──► (Regular News) ──► Threshold Filter (High >= 80, Medium >= 50)
+         │                           │ (Discard low-relevance items)
+         │                           ▼
+         │                       Gemini Stage 2: Premium Article Generation
+         │                           │ (500-word stories, Sentiment, Time Horizon)
+         │
+         └──► (Earnings Result) ─► Earnings Pipeline: Financial Data Collection
+                                     │ (Targeted search + URL Context + Gap-fill)
+                                     ▼
+                                 Earnings Pipeline: Financial Analysis
+                                     │ (Detailed evaluation & scoring)
+         ▼
+Image Resolver (Cache → Wikimedia → Pexels → Unsplash)
+         │
+         ▼
+SQLite DB (news_articles & raw_news_items)
 ```
 
 ## Fetch Schedule
 
 | Market State         | Interval |
 |----------------------|----------|
-| Open (09:00–15:30)   | 5 min    |
-| After-market (–20:00)| 15 min   |
-| Night / Weekend      | 30 min   |
+| Open (09:00–15:30)   | 15 min    |
+| After-market (–20:00)| 30 min   |
+| Night / Weekend      | 60 min   |
 
 ## API Endpoints
 
 | Method | Path            | Description                           |
 |--------|-----------------|---------------------------------------|
-| GET    | `/news/`        | Paginated news list (rich filtering)  |
+| GET    | `/news/`        | Paginated AI-enriched articles        |
+| GET    | `/news/raw`     | Raw fetched items + Stage 1 scores    |
 | GET    | `/news/status`  | Scheduler health + DB stats           |
-| GET    | `/news/{id}`    | Single article                        |
 | POST   | `/news/refresh` | Manual trigger (ops/dev)              |
 
-### Query Parameters for `GET /news/`
+### Query Parameters for `GET /news/` and `GET /news/raw`
 
-| Param      | Example          | Description                          |
-|------------|------------------|--------------------------------------|
-| `page`     | `1`              | Page number                          |
-| `page_size`| `20`             | Items per page (max 100)             |
-| `category` | `IPO`            | Filter by category                   |
-| `sentiment`| `Positive`       | Filter by sentiment                  |
-| `impact`   | `High`           | Filter by impact level               |
-| `tier`     | `1`              | Source tier (1=official, 2=media)    |
-| `company`  | `HDFC`           | Filter by company                    |
-| `sector`   | `Banking`        | Filter by sector                     |
-| `tag`      | `RBI`            | Filter by tag                        |
-| `search`   | `repo rate`      | Full-text search                     |
-| `sort`     | `importance`     | newest \| oldest \| importance       |
+| Param                | Example                | Description                          |
+|----------------------|------------------------|--------------------------------------|
+| `page`               | `1`                    | Page number                          |
+| `page_size`          | `20`                   | Items per page (max 100)             |
+| `sentiment`          | `Positive`             | Filter by sentiment                  |
+| `market_impact_level`| `High`                 | Filter by market impact level        |
+| `time_horizon`       | `short_term_catalyst`  | `short_term_catalyst`\|`long_term_structural`\|`both` |
+| `source`             | `NSE`                  | Filter by source (e.g. NSE, SEBI)    |
+| `company`            | `HDFC`                 | Filter by company                    |
+| `sector`             | `Banking`              | Filter by sector                     |
+| `tag`                | `RBI`                  | Filter by tag                        |
+| `search`             | `repo rate`            | Full-text search (only `/news/`)     |
 
 ## Environment Variables
 
@@ -69,19 +88,31 @@ RSS Fetcher (18 sources) → Gemini Enrichment → Image Resolver → SQLite DB
 GEMINI_API_KEY=your_gemini_api_key
 GEMINI_MODEL=gemini-2.5-flash
 
-# Optional — Image resolution (Tier-1)
-GOOGLE_API_KEY=your_google_api_key
-GOOGLE_CX=your_custom_search_engine_id
+# Image Resolution Providers
+IMAGE_PROVIDER_PRIORITY=wikimedia,pexels,unsplash
+PEXELS_API_KEY=your_pexels_key
+UNSPLASH_ACCESS_KEY=your_unsplash_key
 
-# Optional — Tuning
+# Stage 1 Thresholds
+STAGE1_HIGH_THRESHOLD=80
+STAGE1_MEDIUM_THRESHOLD=50
+STAGE1_GENERATE_MEDIUM=true
+
+# Batching (Token Management)
+STAGE1_BATCH_SIZE=15
+STAGE2_BATCH_SIZE=8
+
+# Earnings Pipeline
+EARNINGS_MIN_COMPLETENESS_PCT=60
+
+# Tuning
 NEWS_DB_PATH=news.db
 NEWS_RETENTION_HOURS=24
-NEWS_INTERVAL_OPEN=300       # 5 min (market open)
-NEWS_INTERVAL_CLOSED=900     # 15 min (after market)
-NEWS_INTERVAL_NIGHT=1800     # 30 min (night/weekend)
-NEWS_ARTICLES_PER_CYCLE=15
+NEWS_INTERVAL_OPEN=900       # 15 min (market open)
+NEWS_INTERVAL_CLOSED=1800    # 30 min (after market)
+NEWS_INTERVAL_NIGHT=3600     # 60 min (night/weekend)
 NEWS_MAX_RETRIES=3
-NEWS_TEMPERATURE=0.1
+NEWS_TEMPERATURE=0.0
 ```
 
 ## Setup
@@ -89,28 +120,17 @@ NEWS_TEMPERATURE=0.1
 ```bash
 pip install -r requirements.txt
 
-# Optionally set up Google Custom Search for better images:
-# 1. Create a project at https://console.cloud.google.com
-# 2. Enable "Custom Search API"
-# 3. Create a Custom Search Engine at https://cse.google.com
-# 4. Set GOOGLE_API_KEY and GOOGLE_CX env vars
-
 # Run
-uvicorn api:app --host 0.0.0.0 --port 8000 --reload
-```
-
-## Mounting in parent app
-
-```python
-# api.py
-from news import news_app
-app.mount("/news", news_app)
+uvicorn news.api:news_app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ## Key Design Decisions
 
-- **Deduplication**: Articles are identified by `sha256(headline)`. The DB uses `INSERT OR IGNORE` to prevent duplicates.
-- **Image verification**: All image URLs are HEAD-verified before storage. Falls back through 3 layers.
-- **24h TTL**: Expired articles are auto-pruned each scheduler cycle.
-- **Circuit breaker**: Exponential back-off with `max_retries` before giving up a cycle.
-- **WAL mode**: SQLite in Write-Ahead Logging mode for concurrent reads/writes.
+- **Two-Stage Pipeline**: Decouples intelligence evaluation from premium article generation. Stage 1 acts as a data-driven filter scoring items against multiple trading personas.
+- **Threshold-Driven Generation**: Decision logic uses `STAGE1_HIGH_THRESHOLD` and `STAGE1_MEDIUM_THRESHOLD` on `market_relevance_score` to determine article generation (replacing legacy LLM booleans).
+- **Dedicated Earnings Pipeline**: Items classified as earnings results bypass the normal filter and trigger a specialized financial data collection and analysis pipeline.
+- **Targeted Gap-Fill Mechanism**: The earnings data collection self-assesses its `data_completeness_pct` and automatically executes a targeted secondary fetch for any missing financial fields before proceeding to analysis.
+- **Robust JSON Healing**: Uses `json-repair` to dynamically recover broken Gemini JSON outputs (unescaped chars, missing colons) avoiding pipeline crashes.
+- **Deduplication**: URL-hash based UIDs persist in `raw_news_items`, bypassing erratic or static timestamps published by official exchange RSS feeds. 
+- **Image Fallback Chain**: High-performance image discovery prioritizing keyless open-source providers (Wikimedia) before falling back to quota-limited premium APIs (Pexels, Unsplash).
+- **Date parsing**: Uses `python-dateutil` to handle dozens of non-standard date formats emitted by varied Indian regulatory feeds.

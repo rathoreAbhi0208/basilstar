@@ -214,6 +214,8 @@ async def get_status(request: Request) -> SchedulerStatusResponse:
         last_stage1_evaluated = pipeline_stats.get("stage1_evaluated"),
         last_stage1_passed    = pipeline_stats.get("stage1_passed"),
         last_stage2_generated = pipeline_stats.get("stage2_generated"),
+        last_earnings_detected  = pipeline_stats.get("earnings_detected"),
+        last_earnings_generated = pipeline_stats.get("earnings_generated"),
     )
 
 

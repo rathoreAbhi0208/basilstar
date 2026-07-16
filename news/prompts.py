@@ -1,6 +1,4 @@
 """
-news/prompts.py
----------------
 Two-stage Gemini prompt system for the Market Intelligence Pipeline.
 
 Stage 1 — Market Intelligence Evaluation
@@ -35,6 +33,10 @@ class EvaluationOutput(BaseModel):
     confidence_score:        int   = Field(ge=0, le=100)
     reason:                  str
     event_category:          str
+    classification:          str   = Field(
+        default="REGULAR_NEWS",
+        description="REGULAR_NEWS or EARNINGS_RESULT",
+    )
     time_horizon:            str   # "short_term_catalyst" | "long_term_structural" | "both"
     executive_summary:       str
     market_indices_impact:   list[str]
@@ -85,223 +87,178 @@ MAX_ARTICLES = 15
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# STAGE 1 PROMPT — v3: multi-persona, multi-dimensional trading-utility scoring
+# STAGE 1 PROMPT — v3: compact, multi-persona trading-utility scoring + dedup
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_STAGE1_PERSONAS = """\
-TARGET AUDIENCE — score for ALL of these personas, not just one:
-- Intraday traders: need same-day price-moving catalysts, liquidity/volume triggers.
-- Swing traders (days-to-weeks): need momentum shifts, technical/fundamental
-  inflection points, event-driven setups (results, order wins, rating actions).
-- Positional traders (weeks-to-months): need trend-confirming or trend-reversing
-  developments — guidance changes, sector re-ratings, policy shifts.
-- Long-term investors: need structural, fundamental, valuation-altering information —
-  earnings quality, capital allocation (buybacks/dividends/bonus), governance, moats.
-- Portfolio managers: need portfolio-level and sector/index-level implications,
-  correlation/risk factors, allocation-relevant macro and flow data.
-- Research analysts: need verifiable facts and numbers suitable for building or
-  revising models and estimates.
-
-An item does not need to matter to ALL personas to score high — it needs to be
-GENUINELY decision-relevant to AT LEAST ONE, and the more personas it serves,
-the higher it can justifiably score.
-"""
-
-_STAGE1_HIGH_VALUE_EVENTS = """\
-HIGH-VALUE EVENT TYPES — actively prioritize these categories, but do NOT
-auto-inflate the score just because an item falls into one of them. Always
-evaluate the actual numbers/terms present:
-Earnings results & guidance changes | Dividends, bonus issues, splits, buybacks,
-rights issues | IPOs, QIPs, preferential allotments | Mergers, acquisitions,
-demergers, stake sales, JVs | Large order wins/losses, major contracts |
-Promoter stake changes (pledge/unpledge/buy/sell), insider disclosures |
-Block deals and bulk deals with named parties and price/volume | Credit rating
-changes | SEBI/NSE/BSE regulatory actions, circulars, penalties | Index
-additions/removals/weight changes | FII/DII flow data | RBI policy decisions
-(rates, CRR/SLR, liquidity) | Macro data (CPI/WPI, GDP, IIP, PMI, trade data) |
-Commodity/currency moves affecting margins or export/import economics |
-Governance events: management changes, litigation, fraud allegations, auditor
-resignations.
-"""
-
-_STAGE1_SCORING_RULES = f"""\
+_STAGE1_CORE_RULES = """\
 SCORING PHILOSOPHY:
-This platform exists ONLY for active traders and investors in Indian equity
-markets. Do not score "how prestigious is this entity/source" — score "how
-much does this change what a trader or investor should do." Official-source
-status (RBI, SEBI, NSE, BSE, exchange filings) should raise your CONFIDENCE in
-the facts, but must NOT automatically inflate the RELEVANCE score. A verified
-but inconsequential circular is still low relevance; an unofficial but highly
-material and verifiable development is still high relevance.
+Score "how much this changes trader/investor action," NOT "how prestigious the
+source is." Official sources (RBI/SEBI/NSE/BSE/filings) raise CONFIDENCE, never
+RELEVANCE by themselves. A verified-but-inconsequential circular stays low
+relevance; an unofficial-but-material, verifiable development stays high.
 
-{_STAGE1_PERSONAS}
+AUDIENCE (item must serve >=1; serving more personas can raise the score):
+intraday (same-day catalysts, liquidity triggers) | swing/days-weeks (momentum
+shifts, event setups) | positional/weeks-months (trend-confirming/reversing
+guidance, ratings, policy) | long-term investors (structural/valuation facts:
+earnings quality, capital allocation, governance, moats) | portfolio managers
+(sector/index/risk/flow implications) | research analysts (verifiable numbers
+for models).
 
-{_STAGE1_HIGH_VALUE_EVENTS}
+HIGH-VALUE CATEGORIES (prioritize, but always judge the actual numbers, not
+just category membership): earnings & guidance | dividends/bonus/splits/
+buybacks/rights | IPO/QIP/preferential allotment | M&A/demerger/stake sale/JV |
+order wins/major contracts | promoter stake & insider moves | block/bulk deals
+(named party + price/volume) | credit rating actions | SEBI/NSE/BSE actions,
+circulars, penalties | index add/remove/reweight | FII/DII flows | RBI policy
+(rates, CRR/SLR, liquidity) | macro (CPI/WPI/GDP/IIP/PMI/trade) | commodity/FX
+moves hitting margins or trade economics | governance events (management
+change, litigation, fraud, auditor exit).
 
-market_relevance_score: INTEGER 0-100, assessed across six dimensions. Weigh
-them together holistically (no fixed formula) — but your `reason` must name
-the dimension(s) that drove the score.
+market_relevance_score: INTEGER 0-100, weighed holistically across six
+dimensions (no fixed formula) — `reason` MUST name the dimension(s) that
+drove the score:
+  1. ACTIONABILITY - names specific stock/sector/index with clear direction;
+     has concrete parameters (price/qty/ratio/%/date/deal size); reader
+     doesn't need extra research to know what to do.
+  2. MATERIALITY - beats/misses consensus, reverses trend, new risk/opportunity,
+     changes earnings/margin/growth trajectory. Routine/expected = low,
+     regardless of company size; a real small/mid-cap surprise can outrank a
+     non-event at a large-cap.
+  3. SPECIFICITY & VERIFIABILITY - hard numbers/named counterparties/dates/
+     filing refs = high; generic/unnamed/speculative = low regardless of
+     source prestige. Verify via search grounding; unverifiable != score boost.
+  4. TIMELINESS - breaking/same-day beats stale/rehashed; if grounding shows
+     the market already digested it (multi-day-old, price adjusted), score down.
+  5. SCOPE OF IMPACT - a MULTIPLIER, not standalone: index/sector/macro breadth
+     amplifies an already-actionable+material story, doesn't substitute for it.
+  6. LONG-TERM VALUATION IMPACT - structural shifts (capacity, M&A, regulatory
+     regime, capital allocation, governance/fraud) that move fair value/margin/
+     growth over quarters-years score high here even with muted same-day move.
 
-1. ACTIONABILITY — Can a trader or investor act on this directly? Names
-   specific stocks/sectors/indices with a clear directional implication.
-   Contains concrete parameters (price, quantity, ratio, %, date, deal size) —
-   not just narrative. Does not require reader expertise to know what to do next.
+Sanity check before finalizing (reason silently, don't output as fields): Would
+this be in a professional morning briefing? Does it change earnings/valuation/
+strategy for a covered stock/sector? If both "no" -> score well under 50
+regardless of source prestige.
 
-2. MATERIALITY — How much does this change the investment case? Beats/misses
-   consensus, reverses a prior trend, introduces new risk/opportunity, changes
-   earnings/margin/growth trajectory. Routine/expected events are LOW
-   materiality regardless of company size. A genuine surprise at a small/mid-cap
-   can outrank a non-event at a large-cap.
+SCORE BANDS (guideline; content quality can shift an item across bands):
+  90-100  Decisively actionable + material + specific + fresh. Morning-briefing
+          lead: confirmed RBI rate move, earnings beat/miss vs. consensus with
+          numbers, signed M&A with terms, index reconstitution w/ dates,
+          trading halt, large confirmed order win changing revenue visibility.
+  75-89   Clearly actionable/material for a specific stock/sector, any market
+          cap, WITH concrete numbers: named block/bulk deal, rating change,
+          surprise management exit, promoter stake change w/ figures, guidance
+          revision, quantified sector circular.
+  55-74   Moderately useful: relevant to >=1 persona, real data, but narrower/
+          partly anticipated/moderate materiality: in-line results, routine
+          non-trivial filings, FII/DII flows without a dramatic swing.
+  35-54   Low-moderate: tangential, informational, thin direct trading value:
+          minor procedural filings, reiterated guidance w/ no new number, soft
+          commentary w/ no data, early-stage/rumored items.
+  0-34    Not trading-useful: PR/marketing copy, stale/priced-in news, generic
+          education, admin notices (holidays, portal maintenance), vague
+          "markets may see volatility" with no actionable detail.
 
-3. SPECIFICITY & VERIFIABILITY — Hard numbers, named counterparties, dates,
-   filing references = high. Generic statements, unnamed sources, speculation
-   with no hard data = low, regardless of source prestige. Use Google Search
-   grounding to verify; unverifiable claims must not inflate the score.
+ANTI-PATTERNS - always score LOW, regardless of source/company size:
+  promotional PR with no new fact | restated known info, no new number |
+  opinion/forecast with no data | headline implies news but body has no detail
+  | official-but-procedural item with no quantified market/compliance impact.
 
-4. TIMELINESS — Same-day/breaking news outranks rehashed or stale news. If
-   grounding shows the market has already digested and moved past this
-   (multi-day-old, price already adjusted), reduce the score even if the
-   original event was significant.
+ANTI-PATTERNS - do NOT under-score for being small/unofficial:
+  small-cap/SME with a material, specific, fresh block deal / order win /
+  promoter pledge-unpledge / rating change / related-party txn w/ figures ->
+  55+ minimum, often 75+ | narrow sector notices with compliance deadlines,
+  penalties, or quantified cost impact are actionable, not "just procedural."
 
-5. SCOPE OF IMPACT — Breadth of affected participants/instruments. Acts as a
-   MULTIPLIER on the above, not a standalone score. Index-level, sector-wide,
-   or macro scope amplifies an already-actionable, material story — it does
-   not substitute for actionability/materiality on its own.
+confidence_score: INTEGER 0-100 - confidence that (a) facts are verified via
+search grounding and (b) the relevance score correctly applies the criteria
+above. Official/verifiable sources raise THIS score, never relevance directly.
 
-6. LONG-TERM VALUATION IMPACT — Does this alter the fundamental thesis?
-   Structural developments (capacity expansion, M&A, regulatory regime change,
-   capital allocation policy, governance/fraud issues) that shift fair value,
-   margins, or growth trajectory over multiple quarters/years score high here
-   even if same-day price reaction is muted.
+All scores are INTEGERS (85, never 0.85).
+"""
 
-BEFORE ASSIGNING A SCORE, INTERNALLY CHECK (reason through these, do not
-output them as separate fields):
-   - Would this merit inclusion in a professional trader's morning briefing?
-   - Does this change earnings expectations, valuation, or trading strategy
-     for any covered stock/sector?
-   If the honest answer to both is "no," the score should be well under 50
-   regardless of how official or well-sourced the item is.
-
-SCORE BANDS (guideline, not rigid — content quality can move an item across bands):
-    90-100 = Decisively actionable AND highly material AND specific AND fresh.
-             Would lead a morning briefing. E.g. confirmed RBI rate decision,
-             major earnings beat/miss vs consensus with numbers, signed M&A
-             with deal terms, index reconstitution with effective dates,
-             trading halt/regulatory restriction, large confirmed order win
-             that materially changes revenue visibility.
-    75-89  = Clearly actionable and material for a specific stock/sector/theme,
-             regardless of market cap, PROVIDED concrete numbers/terms are
-             present. E.g. mid/small-cap block or bulk deal with named buyer
-             and price, credit rating change, unexpected management exit,
-             promoter stake change with figures, sector circular with
-             quantified compliance cost, guidance revision.
-    55-74  = Moderately useful: relevant to at least one persona, real data
-             behind it, but narrower in scope, partially anticipated, or
-             moderate materiality. In-line quarterly results, routine but
-             non-trivial filings, FII/DII flow data without a dramatic swing,
-             sector commentary backed by real figures.
-    35-54  = Low-moderate: tangentially relevant, mostly informational, thin
-             direct trading value. Minor procedural filings, reiterated
-             guidance with no new number, soft official commentary without
-             new data, early-stage/rumored developments.
-    0-34   = Not useful for trading or investment decisions. Pure PR/marketing
-             copy, stale or fully-priced-in news, generic educational content,
-             administrative notices (holiday calendars, portal maintenance),
-             vague "markets may see volatility" pieces with no actionable detail.
-
-ANTI-PATTERNS — score LOW regardless of source prestige or company size:
-    - Purely promotional press releases with no new financial/operational fact.
-    - Restatement of previously known information with no new number or development.
-    - Opinion/forecast pieces with no data backing ("analysts believe markets could rise").
-    - Headlines implying news where the verified body contains no concrete detail.
-    - Official-source items that are procedural/administrative with no
-      quantified market or compliance impact — official does not mean relevant.
-
-ANTI-PATTERNS — do NOT under-score just because the entity is small or unofficial:
-    - A small-cap or SME stock with a genuinely material, specific, fresh
-      development (block deal, order win, promoter pledge/unpledge, rating
-      change, related-party transaction with figures) deserves 55+ minimum,
-      often 75+, on the strength of the criteria above.
-    - Narrow sector- or theme-specific regulatory notices carrying compliance
-      deadlines, penalties, or quantified cost implications are actionable
-      and should not be scored low merely for being "procedural."
-
-confidence_score: INTEGER 0-100. Your confidence that (a) the facts are
-correctly verified via Google Search grounding, and (b) the assigned
-market_relevance_score correctly reflects trading/investment usefulness per
-the criteria above. Official, verifiable sources should raise this confidence
-score — but must NOT be used to raise the relevance score itself.
-
-- All scores MUST be integers. Never return decimals (e.g. 0.85 is WRONG; use 85).
+_STAGE1_DEDUP_RULES = """\
+DEDUPLICATION (mandatory - the same real-world event often arrives from
+multiple RSS sources with different titles/wording):
+1. Within this batch, compare items by underlying substance (entity + event
+   type + key facts/numbers/dates), not by title text. Group items that
+   describe the SAME real-world event, even if titles/sources/wording differ.
+2. In each duplicate group, pick ONE primary item: the most complete/specific/
+   verifiable version (prefer named source, exact numbers, official filing
+   language). Set "is_duplicate": false and "duplicate_of": null for it.
+3. For every other item in the group, set "is_duplicate": true and
+   "duplicate_of": "<uid of the primary item>". Still score it normally and
+   fill all fields - downstream decides whether to drop it.
+4. Items with no duplicates in this batch: "is_duplicate": false,
+   "duplicate_of": null.
+5. ALWAYS produce "dedup_signature": a short, normalized, machine-comparable
+   string so downstream code can also catch duplicates ACROSS separate
+   batches/runs without another LLM call. Format:
+     "<PRIMARY_ENTITY_UPPER>|<EVENT_CATEGORY>|<KEY_FACT>|<YYYY-MM-DD>"
+   - PRIMARY_ENTITY_UPPER: main company/index/regulator, uppercase, no suffixes
+     like "Ltd"/"Limited" (e.g. "RELIANCE INDUSTRIES", "RBI", "NIFTY 50").
+   - EVENT_CATEGORY: same value as the event_category field.
+   - KEY_FACT: the single most identifying number/term (deal size, rate %,
+     order value, rating grade, stake %) or "NA" if none exists.
+   - Date: the event date (not the article publish time) in YYYY-MM-DD; use
+     the publish date if no other date is stated.
+   Two items about the same event should produce an IDENTICAL signature even
+   if their titles differ completely.
 """
 
 _STAGE1_EXECUTIVE_SUMMARY_RULES = """\
-EXECUTIVE SUMMARY RULES:
-Write EXACTLY 4 short paragraphs (separated by a blank line). This must go
-beyond a recap — it is the primary decision-support text traders will read.
-
-Paragraph 1 — WHAT HAPPENED: The current event, stated clearly with the
-specific numbers/terms involved. No vague language.
-
-Paragraph 2 — HISTORICAL CONTEXT & WHY IT MATTERS: Use Google Search to find:
-    * Has this company/entity had similar events before, and how did the
-      market react then?
-    * Relevant prior quarters' trends, prior policy actions, or comparable
-      precedents (e.g. how SEBI/RBI actions of this type have played out).
-    * Explain WHY this event matters for the investment case, not just what
-      happened.
-
-Paragraph 3 — RISKS, OPPORTUNITIES & TIME HORIZON: Explicitly state:
-    * Key risks and key opportunities this creates.
-    * Whether this is primarily a SHORT-TERM CATALYST (tradeable this week),
-      a LONG-TERM STRUCTURAL development (changes the multi-quarter thesis),
-      or both — be explicit about which.
-
-Paragraph 4 — ACTIONABLE CONCLUSION: A clear, concrete takeaway for
-traders/investors — what to watch next, what this implies for positioning,
-or what would confirm/invalidate the thesis. Avoid hedging filler like
-"investors should stay cautious" without specifying what to watch for.
-
-RULES:
-- DO NOT simply repeat the headline.
-- The summary must stand alone — users should understand the full picture
-  and have a clear next step without reading the full article.
-- Maximum 160 words total across all 4 paragraphs.
+executive_summary field: a SHORT GIST ONLY - max 40 words, one paragraph.
+State what happened (with the key number/term) and why it's material enough
+to justify the score. This is NOT the reader-facing summary - Stage 2 owns
+the full, polished, publication-ready summary for whichever items survive
+filtering, so do not write multi-paragraph prose or do extra research-heavy
+context-building here. Do not just repeat the headline.
 """
 
 _STAGE1_EVENT_CATEGORIES = """\
-EVENT CATEGORIES (pick the single best match):
-Results | Guidance Revision | Dividend | Bonus | Stock Split | Buyback |
-Rights Issue | IPO | QIP | Merger | Acquisition | Demerger | Joint Venture |
-Order Win | Contract Announcement | Promoter Stake Change | Insider Trading |
-SEBI Circular | NSE Circular | BSE Notice | RBI Policy | Repo Rate |
-Inflation | GDP | IIP | PMI | Trade Data | Budget | Crude Oil | Commodity |
-Currency | FII | DII | Block Deal | Bulk Deal | Credit Rating |
-Corporate Governance | Regulatory Action | Management Change | Litigation |
-Bankruptcy | Legal Action | Index Change | Other
+EVENT CATEGORIES (single best match): Results | Guidance Revision | Dividend |
+Bonus | Stock Split | Buyback | Rights Issue | IPO | QIP | Merger |
+Acquisition | Demerger | Joint Venture | Order Win | Contract Announcement |
+Promoter Stake Change | Insider Trading | SEBI Circular | NSE Circular |
+BSE Notice | RBI Policy | Repo Rate | Inflation | GDP | IIP | PMI | Trade
+Data | Budget | Crude Oil | Commodity | Currency | FII | DII | Block Deal |
+Bulk Deal | Credit Rating | Corporate Governance | Regulatory Action |
+Management Change | Litigation | Bankruptcy | Legal Action | Index Change |
+Other
 """
 
 _STAGE1_TIME_HORIZON_RULES = """\
-time_horizon field: EXACTLY one of "short_term_catalyst", "long_term_structural",
-or "both".
-- "short_term_catalyst": primarily tradeable this week; limited multi-quarter
-  thesis impact (e.g. a block deal, a short-term guidance beat).
-- "long_term_structural": primarily changes the multi-quarter/year investment
-  thesis with muted immediate price impact (e.g. capacity expansion, governance
-  change, regulatory regime shift).
-- "both": material in the near term AND changes the structural thesis (e.g. a
-  large confirmed M&A, an RBI policy shift with immediate and lasting effects).
+time_horizon: exactly one of "short_term_catalyst" (tradeable this week,
+limited multi-quarter impact - e.g. block deal, short-term guidance beat),
+"long_term_structural" (changes multi-quarter/year thesis, muted immediate
+price impact - e.g. capacity expansion, governance change, regulatory regime
+shift), or "both" (material now AND structurally - e.g. large confirmed M&A,
+RBI policy shift with immediate + lasting effect).
+"""
+
+_STAGE1_CLASSIFICATION_RULES = """\
+CLASSIFICATION (mandatory, exactly one):
+- EARNINGS_RESULT: ONLY actual reported financial results - Quarterly/Annual/
+  FY Results, Financial/Earnings Release, Standalone/Consolidated Results,
+  Investor Presentation containing published financials.
+- REGULAR_NEWS: everything else, INCLUDING items that look earnings-adjacent
+  but aren't actual reported numbers - Board Meeting Notice/to Consider
+  Results, Earnings Schedule, Investor/Analyst Meeting, Trading Window
+  Closure, Record Date/AGM Notice, pre-results Conference Call Schedule,
+  Dividend Meeting, Results Date Announcement, pre-results analyst estimates,
+  "stock rises after results" market-reaction pieces, guidance revisions
+  without actual reported numbers.
+Regular news -> article pipeline. Earnings results -> financial analysis pipeline.
 """
 
 
 def build_evaluation_prompt(raw_items_json: str, current_time: str) -> str:
     """
-    Stage 1 prompt: evaluate each RSS item for trading/investment usefulness.
-
-    Gemini acts as a Senior Market Intelligence Analyst evaluating for a
-    multi-persona trading audience (intraday/swing/positional traders,
-    long-term investors, portfolio managers, research analysts).
-    It must NOT generate articles — only evaluate, score, and summarise.
+    Stage 1 prompt: evaluate each RSS item for trading/investment usefulness
+    and flag cross-source duplicates. Gemini acts as a Senior Market
+    Intelligence Analyst for a multi-persona trading audience. It must NOT
+    generate articles - only evaluate, score, dedup, and summarise.
 
     Args:
         raw_items_json: JSON array of raw news items (title, url, summary, uid, source_name).
@@ -310,33 +267,27 @@ def build_evaluation_prompt(raw_items_json: str, current_time: str) -> str:
     Returns:
         Complete prompt string.
     """
+    item_count = raw_items_json.count('"uid"')
     return f"""You are a Senior Market Intelligence Analyst for a premium Indian financial intelligence platform serving active traders and investors.
 Current IST time: {current_time}
 
-You have been given a batch of raw news items freshly fetched from RSS feeds covering Indian financial markets.
-
-RAW NEWS ITEMS (JSON array — each item has a "uid" field you MUST preserve):
+RAW NEWS ITEMS (JSON array - each item has a "uid" field you MUST preserve):
 {raw_items_json}
 
-YOUR TASK:
-For EACH item in the array, you must:
-1. Use Google Search grounding to verify the information and read the original source.
-2. Determine whether the event is genuinely useful for trading/investment decisions
-   (see scoring philosophy, personas, and dimensions below).
-3. Assess probable impact on:
-   - Nifty 500, Nifty 50, Sensex, Bank Nifty
-   - Indian Equity Market broadly
-   - Individual listed companies
-   - Market sectors
-   - Indian Economy
-4. Detect the event category.
-5. Classify the time horizon (short-term catalyst vs. long-term structural vs. both).
-6. Write an executive_summary (see rules below).
-7. Assign scores.
+TASK - for EACH item:
+1. Use Google Search grounding to verify facts against the original source.
+2. Score trading/investment usefulness per the rules below.
+3. Assess probable impact on: Nifty 500, Nifty 50, Sensex, Bank Nifty, Indian
+   equity market broadly, individual listed companies, sectors, Indian economy.
+4. Detect event category, classification, and time horizon.
+5. Detect duplicates against other items in this batch (see DEDUPLICATION).
+6. Write the executive_summary.
 
-DO NOT generate full articles. This is an evaluation stage only.
+DO NOT generate full articles - evaluation only.
 
-{_STAGE1_SCORING_RULES}
+{_STAGE1_CORE_RULES}
+
+{_STAGE1_DEDUP_RULES}
 
 {_STAGE1_EXECUTIVE_SUMMARY_RULES}
 
@@ -344,12 +295,13 @@ DO NOT generate full articles. This is an evaluation stage only.
 
 {_STAGE1_TIME_HORIZON_RULES}
 
-reason: One concise sentence (max 25 words) that explicitly names which
-scoring dimension(s) — actionability / materiality / specificity / timeliness /
-scope of impact / long-term valuation impact — drove the score. Avoid
-restating the headline as the reason.
+{_STAGE1_CLASSIFICATION_RULES}
 
-JSON SCHEMA (return exactly this structure — no markdown, no code fences):
+reason: one sentence, max 25 words, names the driving dimension(s)
+(actionability/materiality/specificity/timeliness/scope/long-term valuation).
+Do not just restate the headline.
+
+Return exactly this JSON structure - no markdown, no code fences, no prose outside JSON:
 {{
   "evaluations": [
     {{
@@ -358,8 +310,12 @@ JSON SCHEMA (return exactly this structure — no markdown, no code fences):
       "confidence_score": 90,
       "reason": "string (one sentence, names the driving dimension(s))",
       "event_category": "string from the category list",
+      "classification": "REGULAR_NEWS",
       "time_horizon": "short_term_catalyst | long_term_structural | both",
-      "executive_summary": "Paragraph 1\\n\\nParagraph 2\\n\\nParagraph 3\\n\\nParagraph 4",
+      "is_duplicate": false,
+      "duplicate_of": null,
+      "dedup_signature": "ENTITY|EVENT_CATEGORY|KEY_FACT|YYYY-MM-DD",
+      "executive_summary": "string (short gist, max 40 words)",
       "market_indices_impact": ["Nifty 50", "Bank Nifty"],
       "affected_companies": ["string"],
       "affected_sectors": ["string"]
@@ -367,51 +323,53 @@ JSON SCHEMA (return exactly this structure — no markdown, no code fences):
   ]
 }}
 
-Return ONLY valid JSON. No markdown. No prose outside JSON.
-Process ALL {len(raw_items_json.split('"uid"')) - 1} items."""
-
+Process ALL {item_count} items. Return ONLY valid JSON."""
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# STAGE 2 PROMPT — v2: production-grade article generation
+# STAGE 2 PROMPT — v3
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_STAGE2_IMAGE_RULES = """\
-IMAGE QUERY RULES (image_query field):
-- If about a company: return only the official company name (e.g. "Infosys", "Tata Motors").
-- If about RBI: "Reserve Bank of India"
-- If about SEBI: "Securities and Exchange Board of India"
-- If about NSE: "National Stock Exchange of India"
-- If about BSE: "Bombay Stock Exchange"
-- If about an index: "Nifty 50" or "Sensex"
-- If about a commodity: return its common name (e.g. "Gold", "Crude Oil")
-- If no specific entity: a short industry term (e.g. "Banking", "IPO", "Logistics")
-- Return ONLY 1-5 words. No artistic prompts, no URLs, no full sentences.
-image_alt: One concise sentence describing the expected representative image.
+_STAGE2_LENGTH_RULES = """\
+LENGTH & NO-DUPLICATION RULES (STRICT - this is what keeps the read under
+30-60 seconds):
+- executive_summary: the PRIMARY read. 3 short paragraphs, blank-line
+  separated, <=90 words total.
+- story: SUPPORTING detail only, <=150 words, exactly two sections:
+    ## Overview - 2-3 sentences adding color beyond the executive_summary
+      (do not restate it verbatim).
+    ## Key Takeaways - 3 bullet points, each one short line.
+  Do NOT add sections that duplicate a dedicated field below (no "Trading
+  Implications", "Risk Factors", "Future Outlook", "Retail/Institutional
+  Impact", or "Sector Analysis" headers in story - that content belongs only
+  in its own field).
+- market_impact, retail_investor_impact, institutional_impact,
+  trading_implications, risk_factors, future_outlook: ONE sentence each,
+  <=25 words. Use null if genuinely not applicable/material for this item -
+  do not pad with generic filler to fill the field.
+- Every sentence must earn its place: cut hedge phrases, throat-clearing, and
+  restated headlines.
 """
 
-_STAGE2_SCORING_RULES = """\
-SCORING RULES (STRICT):
-- confidence_score: INTEGER 0-100. Your confidence in the content accuracy —
-  i.e. how well the article's claims are grounded in the source data and
-  Stage 1 evaluation, not a measure of the underlying event's importance.
-- All scores must be integers. Never return decimals.
+_STAGE2_IMAGE_RULES = """\
+image_query: 1-5 words, no sentences/prompts/URLs.
+  Company -> official name ("Infosys"). RBI/SEBI/NSE/BSE -> full official
+  name. Index -> "Nifty 50" / "Sensex". Commodity -> common name ("Gold").
+  No specific entity -> short industry term ("Banking", "IPO").
+image_alt: one concise sentence describing the expected image.
 """
 
 _STAGE2_ANTI_HALLUCINATION = """\
 ACCURACY & CONSISTENCY RULES (STRICT):
-- Do NOT introduce any fact, number, date, or claim that is not present in the
-  source item or the Stage 1 evaluation. If a section-relevant detail (e.g.
-  historical comparison, analyst estimate) is not available, write in general
-  but honest terms rather than inventing a specific figure.
-- The article's sentiment, market_impact_level, and narrative tone MUST be
-  consistent with the Stage 1 market_relevance_score, reason, and
-  time_horizon fields for that item — do not contradict the prior evaluation.
-- If the Stage 1 evaluation marked time_horizon as "long_term_structural",
-  the STORY's ## Future Outlook and ## Risk Factors sections should carry
-  proportionally more weight than ## Trading Implications, and vice versa
-  for "short_term_catalyst". For "both", balance the two.
-- Never present speculation as fact. Phrase uncertain implications as
-  "could," "may," or "signals" rather than stating them definitively.
+- Every fact/number/date/claim must come from the source item or the Stage 1
+  evaluation. If a detail isn't available, write generally rather than
+  inventing a figure - Stage 1 already did the verification; do not re-search
+  for new facts, only use what's provided.
+- sentiment, market_impact_level, and tone must stay consistent with Stage
+  1's market_relevance_score, reason, and time_horizon - do not contradict it.
+- time_horizon "long_term_structural" -> lean the summary's risk/outlook
+  sentence toward the structural thesis; "short_term_catalyst" -> lean toward
+  near-term trading; "both" -> balance in one sentence.
+- Phrase uncertain implications as "could/may/signals," never as fact.
 """
 
 
@@ -420,7 +378,8 @@ def build_article_generation_prompt(
     current_time: str,
 ) -> str:
     """
-    Stage 2 prompt: generate premium financial articles from pre-evaluated items.
+    Stage 2 prompt: generate short, high-signal financial articles (~30-60s
+    read) from pre-evaluated items.
 
     Every item passed here has ALREADY been evaluated and filtered in Stage 1.
     Stage 2 assumes all inputs are market-relevant. No filtering needed here.
@@ -436,81 +395,67 @@ def build_article_generation_prompt(
     return f"""You are a Senior Financial Journalist for a premium Indian financial news platform serving active traders and investors.
 Current IST time: {current_time}
 
-You have been given a batch of pre-evaluated news items. Each item has ALREADY been confirmed as
-useful for trading/investment decisions by a Senior Market Intelligence Analyst (Stage 1). Your job
-is ONLY to write premium quality financial articles from this pre-evaluated data. Do NOT re-evaluate,
-re-score, or filter. Write an article for EVERY item in the input.
+You have been given a batch of pre-evaluated news items, each already confirmed useful for
+trading/investment decisions by a Senior Market Intelligence Analyst (Stage 1). Do NOT
+re-evaluate, re-score, or filter - write a short, high-signal article for EVERY item.
 
-PRE-EVALUATED ITEMS (JSON array — each has "uid", raw news data, and Stage 1 evaluation
-including market_relevance_score, reason, event_category, time_horizon, and executive_summary):
+Readers should get everything they need in 30-60 seconds. Precision and brevity beat
+length - cut anything that isn't a fact, number, or actionable point.
+
+PRE-EVALUATED ITEMS (JSON array - each has "uid", raw news data, and Stage 1 evaluation
+including market_relevance_score, reason, event_category, time_horizon, and a short gist):
 {evaluated_items_json}
 
-YOUR TASK — for each item produce:
+FOR EACH ITEM PRODUCE:
 
-1. HEADLINE: Compelling, factual, max 120 chars. Lead with the concrete fact, not hype.
-   Good: "HDFC Bank Q1 Results Beat Estimates — Net Profit Rises 18% YoY"
+1. HEADLINE: factual, max 120 chars, leads with the concrete fact.
+   Good: "HDFC Bank Q1 Results Beat Estimates - Net Profit Rises 18% YoY"
    Bad:  "HDFC Bank makes announcement" (vague) | "SHOCKING: Bank crashes" (clickbait)
 
-2. EXECUTIVE SUMMARY: Refine the Stage 1 executive_summary into polished, publication-ready
-   prose. Preserve the 4-paragraph structure:
-     Paragraph 1 — What happened, with specific numbers/terms.
-     Paragraph 2 — Historical context and why it matters.
-     Paragraph 3 — Key risks, opportunities, and time horizon (short-term catalyst vs.
-                   long-term structural vs. both).
-     Paragraph 4 — Clear, actionable conclusion for traders/investors.
-   This is the PRIMARY text displayed on the UI — make every sentence earn its place.
-   Maximum 160 words total.
+2. EXECUTIVE SUMMARY (the primary, reader-facing text - see length rules):
+     P1 - What happened, with the specific numbers/terms.
+     P2 - Why it matters (materiality) + time horizon in one line.
+     P3 - Actionable conclusion: what to watch, what it implies for positioning.
 
-3. STORY: Full article, minimum 450 words, with these sections in order:
-   ## Overview
-   ## Why It Matters
-   ## Trading Implications
-   ## Impact on Retail Investors
-   ## Institutional Impact
-   ## Sector Analysis
-   ## Risk Factors
-   ## Future Outlook
-   ## Key Takeaways (3-5 bullet points)
+3. STORY (short supporting detail - see length rules): ## Overview, ## Key Takeaways.
 
-4. All other fields per the schema below.
+4. All remaining fields per the schema below - each a single scannable sentence.
 
 WRITING STANDARDS:
-- Bloomberg / Financial Times quality: precise, data-driven, no filler sentences.
-- Include specific numbers, percentages, and dates from the source wherever available.
-- Explain the "so what" for retail investors in plain, jargon-free language, while
-  keeping institutional-grade precision in the Trading Implications and Institutional
-  Impact sections.
-- Every claim must be traceable to the source item or Stage 1 evaluation — see
-  accuracy rules below.
-- Avoid generic hedge language ("markets may react") without pairing it to a specific
-  driver, level, or scenario.
+- Wire-service precision: specific numbers/%/dates from the source, zero filler sentences.
+- Plain language for retail-relevant fields; institutional-grade precision in
+  trading_implications/institutional_impact.
+- No hedge language ("markets may react") without a specific driver, level, or scenario.
 
 SENTIMENT: Positive | Negative | Neutral | Mixed
 MARKET_IMPACT_LEVEL: Low | Medium | High | Critical
 
-{_STAGE2_IMAGE_RULES}
+{_STAGE2_LENGTH_RULES}
 
-{_STAGE2_SCORING_RULES}
+{_STAGE2_IMAGE_RULES}
 
 {_STAGE2_ANTI_HALLUCINATION}
 
-JSON SCHEMA (return exactly this structure — no markdown, no code fences):
+confidence_score: INTEGER 0-100, confidence in content accuracy (grounding in
+source/Stage 1 data), not the event's importance. Integers only, never decimals.
+
+Return exactly this JSON structure - no markdown, no code fences, no prose outside JSON:
 {{
   "articles": [
     {{
       "uid": "exact uid from the input item",
       "headline": "string (max 120 chars)",
-      "executive_summary": "Paragraph 1\\n\\nParagraph 2\\n\\nParagraph 3\\n\\nParagraph 4",
-      "story": "string (min 450 words with section headers)",
+      "executive_summary": "Paragraph 1\\n\\nParagraph 2\\n\\nParagraph 3",
+      "story": "string (<=150 words: ## Overview + ## Key Takeaways only)",
       "sentiment": "Positive|Negative|Neutral|Mixed",
       "market_impact_level": "Low|Medium|High|Critical",
       "confidence_score": 90,
-      "market_impact": "string (1-2 sentences)",
-      "retail_investor_impact": "string (1-2 sentences)",
-      "institutional_impact": "string (1-2 sentences)",
-      "trading_implications": "string or null",
-      "risk_factors": "string or null",
-      "future_outlook": "string or null",
+      "market_impact": "string (1 sentence, <=25 words)",
+      "retail_investor_impact": "string (1 sentence, <=25 words)",
+      "institutional_impact": "string (1 sentence, <=25 words)",
+      "trading_implications": "string (1 sentence, <=25 words) or null",
+      "risk_factors": "string (1 sentence, <=25 words) or null",
+      "future_outlook": "string (1 sentence, <=25 words) or null",
       "affected_sectors": ["string"],
       "affected_companies": ["string"],
       "market_indices": ["Nifty 50", "Sensex"],
@@ -526,46 +471,42 @@ JSON SCHEMA (return exactly this structure — no markdown, no code fences):
 
 Return ONLY valid JSON. No markdown. No prose outside JSON."""
 
+
 # ═══════════════════════════════════════════════════════════════════════════════
-# STANDALONE FALLBACK PROMPT — v2: self-filtering
+# STANDALONE FALLBACK PROMPT — v3: self-filtering, same short-read standard
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _STANDALONE_RELEVANCE_BAR = """\
 RELEVANCE BAR (STRICT):
-Since this is a fallback mode with no pre-filtering, YOU must independently apply
-the same trading-utility standard the platform normally uses. Only select events
-that are:
-- ACTIONABLE: name specific stocks/sectors/indices with a clear directional
-  implication, backed by concrete numbers, dates, or terms.
-- MATERIAL: represent a genuine beat/miss, trend change, new risk/opportunity,
-  or a structural development — not routine or already-priced-in news.
-- VERIFIABLE: corroborated by at least one credible source via web search, with
-  specific facts, not vague narrative.
-- FRESH: breaking or same-day news, not rehashed coverage of an old event.
+Fallback mode has no pre-filtering - apply the platform's normal trading-
+utility standard yourself. Only select events that are:
+- ACTIONABLE: specific stock/sector/index, clear direction, concrete numbers/
+  dates/terms.
+- MATERIAL: genuine beat/miss, trend change, new risk/opportunity, or
+  structural development - not routine or already-priced-in.
+- VERIFIABLE: corroborated by >=1 credible source via web search, specific
+  facts, not vague narrative.
+- FRESH: breaking or same-day, not rehashed coverage of an old event.
 
-Prioritize high-value categories: earnings & guidance, dividends/bonus/buybacks/
-rights issues, IPOs/QIPs, M&A, large order wins, promoter stake changes, block/
-bulk deals, credit rating changes, SEBI/NSE/BSE regulatory actions, index
-changes, FII/DII flows, RBI policy, key macro data (CPI/GDP/IIP/PMI), and
-commodity/currency moves with a clear market linkage.
+Prioritize: earnings & guidance, dividends/bonus/buybacks/rights issues,
+IPOs/QIPs, M&A, large order wins, promoter stake changes, block/bulk deals,
+credit rating changes, SEBI/NSE/BSE actions, index changes, FII/DII flows,
+RBI policy, key macro data (CPI/GDP/IIP/PMI), commodity/currency moves with a
+clear market linkage.
 
-Do NOT fill remaining article slots with low-value filler just to reach the
-target count. If fewer than {max_articles} genuinely qualifying stories exist
-right now, return fewer articles. Quality and trading usefulness take priority
-over quantity.
+Do NOT fill remaining slots with low-value filler to hit {max_articles}. If
+fewer stories genuinely qualify, return fewer. Quality over quantity.
 """
 
 _STANDALONE_ANTI_HALLUCINATION = """\
 ACCURACY RULES (STRICT):
-- Every number, date, name, and claim in the article MUST come from a source
-  found via web search. Do NOT invent or estimate figures.
-- If you cannot verify a detail with reasonable confidence, omit it rather
-  than guessing.
-- Do not present speculation as fact — use "could," "may," or "signals" for
-  uncertain implications.
-- If search results conflict on a material fact (e.g. differing figures across
-  sources), use the most authoritative/official source (exchange filing,
-  regulator website, or company press release) and do not average or guess.
+- Every number/date/name/claim must come from a source found via web search -
+  never invent or estimate.
+- If a detail can't be verified with reasonable confidence, omit it.
+- Phrase uncertain implications as "could/may/signals," never as fact.
+- If sources conflict on a material fact, use the most authoritative one
+  (exchange filing, regulator site, company press release) - do not average
+  or guess.
 """
 
 
@@ -575,8 +516,9 @@ def build_standalone_prompt(current_time: str, last_run_time: str | None) -> str
 
     Unlike the two-stage pipeline, this mode has no pre-filtering — Gemini must
     both discover AND evaluate relevance in a single pass via web search. It
-    applies the same trading-utility bar as Stage 1 to avoid flooding the feed
-    with low-value filler content just to hit MAX_ARTICLES.
+    applies the same trading-utility bar as Stage 1, and the same short-read
+    standard as Stage 2, to avoid flooding the feed with low-value or bloated
+    filler content just to hit MAX_ARTICLES.
 
     Args:
         current_time:  Current IST datetime string.
@@ -603,32 +545,28 @@ Economic Times, Moneycontrol, Mint, Business Standard, CNBC TV18.
 
 {_STANDALONE_RELEVANCE_BAR.format(max_articles=MAX_ARTICLES)}
 
-For each qualifying story, write a premium article following these standards:
+Readers should get everything they need in 30-60 seconds - for each qualifying story:
 
-1. HEADLINE: Compelling, factual, max 120 chars. Lead with the concrete fact, not hype.
+1. HEADLINE: factual, max 120 chars, leads with the concrete fact, not hype.
 
-2. EXECUTIVE SUMMARY: Exactly 4 short paragraphs (blank line separated), max 160 words total:
-     Paragraph 1 — What happened, with specific numbers/terms.
-     Paragraph 2 — Historical context and why it matters.
-     Paragraph 3 — Key risks, opportunities, and time horizon (short-term catalyst
-                   vs. long-term structural vs. both).
-     Paragraph 4 — Clear, actionable conclusion for traders/investors.
+2. EXECUTIVE SUMMARY (primary read, <=90 words total, 3 short paragraphs):
+     P1 - What happened, with specific numbers/terms.
+     P2 - Why it matters (materiality) + time horizon in one line.
+     P3 - Actionable conclusion: what to watch, what it implies for positioning.
 
-3. STORY: Full article, minimum 450 words, with these sections in order:
-   ## Overview
-   ## Why It Matters
-   ## Trading Implications
-   ## Impact on Retail Investors
-   ## Institutional Impact
-   ## Sector Analysis
-   ## Risk Factors
-   ## Future Outlook
-   ## Key Takeaways (3-5 bullet points)
+3. STORY (supporting detail only, <=150 words, exactly): ## Overview (2-3
+   sentences, no restating the summary) + ## Key Takeaways (3 short bullets).
+   No duplicate "Trading Implications"/"Risk Factors"/"Impact" headers - that
+   content belongs only in its own field below.
+
+4. market_impact, retail_investor_impact, institutional_impact,
+   trading_implications, risk_factors, future_outlook: ONE sentence each,
+   <=25 words, null if not materially applicable.
 
 WRITING STANDARDS:
-- Bloomberg / Financial Times quality: precise, data-driven, no filler sentences.
-- Explain the "so what" for retail investors in plain language while keeping
-  institutional-grade precision in Trading Implications and Institutional Impact.
+- Wire-service precision: specific numbers/dates, zero filler.
+- Plain language for retail-relevant fields; precise for Trading Implications/
+  Institutional Impact.
 
 SENTIMENT: Positive | Negative | Neutral | Mixed
 MARKET_IMPACT_LEVEL: Low | Medium | High | Critical
@@ -636,37 +574,34 @@ MARKET_IMPACT_LEVEL: Low | Medium | High | Critical
 {_STANDALONE_ANTI_HALLUCINATION}
 
 IMAGE QUERY RULES (image_query field):
-- If about a company: official company name only (e.g. "Infosys", "Tata Motors").
-- If about RBI/SEBI/NSE/BSE: full official name.
-- If about an index: "Nifty 50" or "Sensex".
-- If about a commodity: common name (e.g. "Gold", "Crude Oil").
-- If no specific entity: a short industry term (e.g. "Banking", "IPO").
-- Return ONLY 1-5 words. No artistic prompts, no URLs, no full sentences.
-image_alt: One concise sentence describing the expected representative image.
+- Company -> official name ("Infosys"). RBI/SEBI/NSE/BSE -> full official name.
+- Index -> "Nifty 50"/"Sensex". Commodity -> common name ("Gold").
+- No specific entity -> short industry term ("Banking", "IPO").
+- 1-5 words only. No artistic prompts, URLs, or full sentences.
+image_alt: one concise sentence describing the expected image.
 
-confidence_score: INTEGER 0-100. Your confidence in the verification and
-accuracy of this article's claims. All scores MUST be integers, never decimals.
+confidence_score: INTEGER 0-100, confidence in verification/accuracy. Integers only.
 
-Generate UP TO {MAX_ARTICLES} qualifying articles (fewer is acceptable — see relevance bar above).
+Generate UP TO {MAX_ARTICLES} qualifying articles (fewer is fine - see relevance bar above).
 
-JSON SCHEMA (return exactly this structure — no markdown, no code fences):
+Return exactly this JSON structure - no markdown, no code fences:
 {{
   "articles": [
     {{
       "uid": "generate-standalone-N",
       "headline": "string (max 120 chars)",
-      "executive_summary": "Paragraph 1\\n\\nParagraph 2\\n\\nParagraph 3\\n\\nParagraph 4",
-      "story": "string (min 450 words with section headers)",
+      "executive_summary": "Paragraph 1\\n\\nParagraph 2\\n\\nParagraph 3",
+      "story": "string (<=150 words: ## Overview + ## Key Takeaways only)",
       "sentiment": "Positive|Negative|Neutral|Mixed",
       "market_impact_level": "Low|Medium|High|Critical",
       "confidence_score": 0,
       "published_at": "string (ISO 8601 or null)",
-      "market_impact": "string",
-      "retail_investor_impact": "string",
-      "institutional_impact": "string",
-      "trading_implications": "string or null",
-      "risk_factors": "string or null",
-      "future_outlook": "string or null",
+      "market_impact": "string (1 sentence, <=25 words)",
+      "retail_investor_impact": "string (1 sentence, <=25 words)",
+      "institutional_impact": "string (1 sentence, <=25 words)",
+      "trading_implications": "string (1 sentence, <=25 words) or null",
+      "risk_factors": "string (1 sentence, <=25 words) or null",
+      "future_outlook": "string (1 sentence, <=25 words) or null",
       "affected_sectors": ["string"],
       "affected_companies": ["string"],
       "market_indices": ["string"],
@@ -680,7 +615,7 @@ JSON SCHEMA (return exactly this structure — no markdown, no code fences):
   ]
 }}
 
-Return ONLY valid JSON. No markdown, no code fences."""
+Return ONLY valid JSON, no markdown, no code fences."""
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
