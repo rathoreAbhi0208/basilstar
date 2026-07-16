@@ -57,7 +57,9 @@ CREATE TABLE IF NOT EXISTS news_articles (
     published_at            TEXT,               -- ISO date or null
     image_query             TEXT,
     image_url               TEXT,
-    image_alt               TEXT
+    image_alt               TEXT,
+    content_type            TEXT DEFAULT 'news',
+    earnings_analysis       TEXT
 );
 """
 
@@ -112,17 +114,18 @@ INSERT OR IGNORE INTO news_articles (
     trading_implications, risk_factors, future_outlook,
     affected_sectors, affected_companies, market_indices, tags,
     event_category, time_horizon, expires_at_unix,
-    primary_entity, entity_type, source, published_at, image_query, image_url, image_alt
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    primary_entity, entity_type, source, published_at, image_query, image_url, image_alt,
+    content_type, earnings_analysis
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 """
 
 _INSERT_RAW_NEWS_SQL = """
 INSERT OR REPLACE INTO raw_news_items (
     uid, title, url, summary, source_name, source_tier, published_at, category,
     market_relevance_score, confidence_score, decision, reason, event_category, time_horizon,
-    executive_summary, market_indices_impact, affected_companies, affected_sectors,
+    classification, executive_summary, market_indices_impact, affected_companies, affected_sectors,
     created_at_unix
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 """
 
 
@@ -157,6 +160,9 @@ class NewsDB:
                 "ALTER TABLE news_articles ADD COLUMN market_impact_level TEXT;",
                 "ALTER TABLE news_articles ADD COLUMN published_at TEXT;",
                 "ALTER TABLE raw_news_items ADD COLUMN time_horizon TEXT;",
+                "ALTER TABLE raw_news_items ADD COLUMN classification TEXT DEFAULT 'REGULAR_NEWS';",
+                "ALTER TABLE news_articles ADD COLUMN content_type TEXT DEFAULT 'news';",
+                "ALTER TABLE news_articles ADD COLUMN earnings_analysis TEXT;",
             ]
             for migration in _migrations:
                 try:
@@ -213,6 +219,8 @@ class NewsDB:
                 a.image_query,
                 a.image_url,
                 a.image_alt,
+                a.content_type,
+                json.dumps(a.earnings_analysis) if a.earnings_analysis else None,
             ))
 
         async with aiosqlite.connect(self._db_path) as db:
@@ -254,6 +262,7 @@ class NewsDB:
                 i.evaluation.reason,
                 i.evaluation.event_category,
                 i.evaluation.time_horizon,
+                getattr(i.evaluation, 'classification', 'REGULAR_NEWS'),
                 i.evaluation.executive_summary,
                 json.dumps(i.evaluation.market_indices_impact),
                 json.dumps(i.evaluation.affected_companies),
@@ -357,9 +366,9 @@ class NewsDB:
         if source:
             where.append("source LIKE ?");         params.append(f"%{source}%")
         if search:
-            where.append("(headline LIKE ? OR short_summary LIKE ? OR story LIKE ?)")
-            params += [f"%{search}%", f"%{search}%", f"%{search}%"]
-
+            where.append("(headline LIKE ? OR story LIKE ?)")
+            params += [f"%{search}%", f"%{search}%"]
+            
         where_sql = " AND ".join(where)
         order_sql = {
             "importance": "market_relevance_score DESC, expires_at_unix DESC",
@@ -476,22 +485,50 @@ class NewsDB:
 
 def _row_to_article(row: aiosqlite.Row) -> NewsArticle:
     d = dict(row)
-    # Deserialise JSON array columns
-    for col in ("affected_sectors", "affected_companies", "market_indices", "tags"):
-        if col in d:
-            d[col] = json.loads(d.get(col) or "[]")
 
-    # Strip legacy / dropped columns
+    # Deserialize JSON columns
+    for col in (
+        "affected_sectors",
+        "affected_companies",
+        "market_indices",
+        "tags",
+    ):
+        try:
+            d[col] = json.loads(d.get(col) or "[]")
+        except Exception:
+            d[col] = []
+
+    # Deserialize earnings analysis
+    if d.get("earnings_analysis"):
+        try:
+            d["earnings_analysis"] = json.loads(d["earnings_analysis"])
+        except Exception:
+            d["earnings_analysis"] = None
+    else:
+        d["earnings_analysis"] = None
+
+    # Remove legacy columns that may exist in older databases
     for drop_col in (
-        "keywords", "estimated_read_time", "generated_at",
-        "expires_at", "source_url", "source_name", "source_tier",
-        "official_sources", "disclaimer", "expires_at_unix", "image_prompt",
-        "category", "subcategory", "importance_score", "impact", "short_summary",
+        "keywords",
+        "estimated_read_time",
+        "generated_at",
+        "expires_at",
+        "source_url",
+        "source_name",
+        "source_tier",
+        "official_sources",
+        "disclaimer",
+        "expires_at_unix",
+        "image_prompt",
+        "category",
+        "subcategory",
+        "importance_score",
+        "impact",
     ):
         d.pop(drop_col, None)
 
-    # Default new fields for rows written by old schema
-    d.setdefault("executive_summary", d.get("short_summary", ""))
+    # Default values for backward compatibility
+    d.setdefault("executive_summary", "")
     d.setdefault("market_relevance_score", 0)
     d.setdefault("market_indices", [])
     d.setdefault("trading_implications", None)
@@ -499,6 +536,8 @@ def _row_to_article(row: aiosqlite.Row) -> NewsArticle:
     d.setdefault("future_outlook", None)
     d.setdefault("event_category", None)
     d.setdefault("time_horizon", "both")
+    d.setdefault("content_type", "news")
+    d.setdefault("earnings_analysis", None)
 
     return NewsArticle(**d)
 

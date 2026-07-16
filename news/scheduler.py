@@ -43,10 +43,18 @@ from google import genai
 from .config         import settings, get_fetch_interval_seconds, get_market_state, current_ist
 from .db             import NewsDB
 from .fetcher        import fetch_sources
-from .generator      import generate_news
+from .generator      import (
+    evaluate_raw_items,
+    filter_evaluated_items,
+    generate_articles_from_evaluated,
+    generate_news,
+)
 from .image_resolver import ImageResolver
-from .models         import NewsArticle
+from .models         import NewsArticle, NewsClassification
 from .rss_sources    import GOOGLE_NEWS_SOURCES, OFFICIAL_SOURCES
+
+# Earnings pipeline imports
+from .earnings.generator import generate_earnings_report
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +103,8 @@ class NewsPipeline(BasePipeline):
         self._last_stage1_evaluated: int = 0
         self._last_stage1_passed:    int = 0
         self._last_stage2_generated: int = 0
+        self._last_earnings_detected: int = 0
+        self._last_earnings_generated: int = 0
 
     @property
     def name(self) -> str:
@@ -103,9 +113,11 @@ class NewsPipeline(BasePipeline):
     @property
     def last_stats(self) -> dict[str, int]:
         return {
-            "stage1_evaluated": self._last_stage1_evaluated,
-            "stage1_passed":    self._last_stage1_passed,
-            "stage2_generated": self._last_stage2_generated,
+            "stage1_evaluated":    self._last_stage1_evaluated,
+            "stage1_passed":       self._last_stage1_passed,
+            "stage2_generated":    self._last_stage2_generated,
+            "earnings_detected":   self._last_earnings_detected,
+            "earnings_generated":  self._last_earnings_generated,
         }
 
     async def run(
@@ -116,7 +128,7 @@ class NewsPipeline(BasePipeline):
         image_resolver: ImageResolver,
         last_run_time:  str | None,
     ) -> int:
-        # ── 1. Seen UIDs for dedup (URL-hash from raw_news_items) ────────
+        # ── 1. Seen UIDs for dedup ────────────────────────────────────────
         existing_uids = await db.get_raw_existing_uids()
         logger.debug("[NewsPipeline] %d UIDs in dedup set", len(existing_uids))
 
@@ -129,37 +141,105 @@ class NewsPipeline(BasePipeline):
             len(raw_items), len(ALL_SOURCES),
         )
 
-        # ── 4. Two-stage generation ───────────────────────────────────────
-        articles, stats, evaluated_all = await generate_news(
-            client        = gemini_client,
-            model_name    = gemini_model,
-            raw_items     = raw_items if raw_items else None,
-            last_run_time = last_run_time,
+        if not raw_items:
+            # Standalone fallback (no raw items)
+            articles, stats, evaluated_all = await generate_news(
+                client=gemini_client, model_name=gemini_model,
+                raw_items=None, last_run_time=last_run_time,
+            )
+            self._last_stage1_evaluated = 0
+            self._last_stage1_passed    = 0
+            self._last_stage2_generated = stats.get("stage2_generated", 0)
+            self._last_earnings_detected  = 0
+            self._last_earnings_generated = 0
+            if articles:
+                await _resolve_images(articles, image_resolver)
+                return await db.bulk_insert(articles)
+            return 0
+
+        # ── 3. Stage 1: Evaluate ALL items ────────────────────────────────
+        evaluated_all = await evaluate_raw_items(
+            client=gemini_client, model_name=gemini_model, raw_items=raw_items,
         )
+        self._last_stage1_evaluated = len(evaluated_all)
 
         if evaluated_all:
             await db.bulk_insert_raw_items(evaluated_all)
 
-        # Store stats for status endpoint
-        self._last_stage1_evaluated = stats.get("stage1_evaluated", 0)
-        self._last_stage1_passed    = stats.get("stage1_passed",    0)
-        self._last_stage2_generated = stats.get("stage2_generated", 0)
+        # ── 4. Split by classification ────────────────────────────────────
+        regular_items = []
+        earnings_items = []
+        for item in evaluated_all:
+            if item.evaluation.classification == NewsClassification.EARNINGS_RESULT.value:
+                earnings_items.append(item)
+            else:
+                regular_items.append(item)
 
+        self._last_earnings_detected = len(earnings_items)
         logger.info(
-            "[NewsPipeline] Stage1: evaluated=%d passed=%d | Stage2: generated=%d",
-            self._last_stage1_evaluated,
-            self._last_stage1_passed,
-            self._last_stage2_generated,
+            "[NewsPipeline] Classification: regular=%d earnings=%d",
+            len(regular_items), len(earnings_items),
         )
 
-        if not articles:
-            return 0
+        total_inserted = 0
 
-        # ── 5. Resolve images concurrently ────────────────────────────────
-        await _resolve_images(articles, image_resolver)
+        # ── 5a. Regular News → existing pipeline (filter + Stage 2) ──────
+        if regular_items:
+            passed, filter_stats, _ = filter_evaluated_items(
+                items=regular_items,
+                high_threshold=settings.stage1_high_threshold,
+                medium_threshold=settings.stage1_medium_threshold,
+                generate_medium=settings.stage1_generate_medium,
+            )
+            self._last_stage1_passed = filter_stats["passed"]
 
-        # ── 6. Persist ────────────────────────────────────────────────────
-        return await db.bulk_insert(articles)
+            if passed:
+                articles = await generate_articles_from_evaluated(
+                    client=gemini_client, model_name=gemini_model,
+                    evaluated_items=passed,
+                )
+                self._last_stage2_generated = len(articles)
+                if articles:
+                    await _resolve_images(articles, image_resolver)
+                    total_inserted += await db.bulk_insert(articles)
+            else:
+                self._last_stage2_generated = 0
+        else:
+            self._last_stage1_passed    = 0
+            self._last_stage2_generated = 0
+
+        # ── 5b. Earnings → dedicated earnings pipeline ───────────────────
+        earnings_generated = 0
+        earnings_articles = []
+        for ei in earnings_items:
+            try:
+                report_article = await generate_earnings_report(
+                    client=gemini_client, model_name=gemini_model, item=ei,
+                )
+                if report_article:
+                    earnings_articles.append(report_article)
+            except Exception as exc:
+                logger.exception(
+                    "[NewsPipeline/Earnings] Failed for '%s': %s",
+                    ei.raw.title[:60], exc,
+                )
+                
+        if earnings_articles:
+            earnings_generated = len(earnings_articles)
+            self._last_earnings_generated = earnings_generated
+            await _resolve_images(earnings_articles, image_resolver)
+            total_inserted += await db.bulk_insert(earnings_articles)
+        else:
+            self._last_earnings_generated = 0
+
+        logger.info(
+            "[NewsPipeline] Stage1=%d | Regular: passed=%d generated=%d | Earnings: detected=%d generated=%d",
+            self._last_stage1_evaluated, self._last_stage1_passed,
+            self._last_stage2_generated, self._last_earnings_detected,
+            self._last_earnings_generated,
+        )
+
+        return total_inserted + earnings_generated
 
 
 # ─── Shared helpers ──────────────────────────────────────────────────────────

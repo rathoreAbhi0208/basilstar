@@ -32,8 +32,8 @@ _MARKET_CLOSE = time(15, 30)
 _EVENING_END  = time(20, 0)
 
 # ─── Fetch Intervals (seconds) ───────────────────────────────────────────────
-INTERVAL_MARKET_OPEN   = int(os.getenv("NEWS_INTERVAL_OPEN",    "900"))   # 15 min
-INTERVAL_MARKET_CLOSED = int(os.getenv("NEWS_INTERVAL_CLOSED",  "1800"))   # 30 min
+INTERVAL_MARKET_OPEN   = int(os.getenv("NEWS_INTERVAL_OPEN",    "1800"))   # 30 min
+INTERVAL_MARKET_CLOSED = int(os.getenv("NEWS_INTERVAL_CLOSED",  "3600"))   # 1 hour
 INTERVAL_NIGHT         = int(os.getenv("NEWS_INTERVAL_NIGHT",  "3600"))   # 1 hour
 
 
@@ -91,7 +91,7 @@ class NewsConfig:
     db_path: str = os.getenv("NEWS_DB_PATH", "news.db")
 
     # ── Retention ────────────────────────────────────────────────────────────
-    retention_hours: int = int(os.getenv("NEWS_RETENTION_HOURS", "24"))
+    retention_hours: int = int(os.getenv("NEWS_RETENTION_HOURS", "12"))
 
     # ── Image search (legacy, kept for compatibility) ─────────────────────────
     google_api_key: str = os.getenv("GOOGLE_API_KEY", "")
@@ -123,6 +123,11 @@ class NewsConfig:
     # Batch sizes for each stage (token budget management)
     stage1_batch_size: int = int(os.getenv("STAGE1_BATCH_SIZE", "15"))
     stage2_batch_size: int = int(os.getenv("STAGE2_BATCH_SIZE", "8"))
+
+    # ── Earnings pipeline ────────────────────────────────────────────────────
+    # If Stage 1's self-reported data_completeness_pct is below this, one
+    # extra targeted gap-fill call runs before Stage 2 analysis.
+    earnings_min_completeness_pct: float = float(os.getenv("EARNINGS_MIN_COMPLETENESS_PCT", "60"))
 
 
 settings = NewsConfig()

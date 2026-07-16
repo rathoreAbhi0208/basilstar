@@ -259,6 +259,7 @@ def _dict_to_evaluation(d: dict) -> EvaluationResult | None:
             time_horizon           = out.time_horizon,
             reason                 = out.reason,
             event_category         = out.event_category,
+            classification         = out.classification,
             executive_summary      = out.executive_summary,
             market_indices_impact  = out.market_indices_impact,
             affected_companies     = out.affected_companies,
@@ -477,6 +478,8 @@ async def generate_articles_from_evaluated(
 
 # ─── News pipeline (public interface) ────────────────────────────────────────
 
+from .earnings.generator import generate_earnings_report
+
 async def generate_news(
     client:        genai.Client,
     model_name:    str,
@@ -542,8 +545,32 @@ async def generate_news(
         logger.info("[News] No items passed Stage 1 filtering — no articles generated")
         return [], stats, evaluated_all_updated
 
-    # ── Stage 2: Generate ─────────────────────────────────────────────────────
-    articles = await generate_articles_from_evaluated(client, model_name, passed)
+    # ── Split by classification ───────────────────────────────────────────────
+    regular_items = []
+    earnings_items = []
+    for item in passed:
+        if item.evaluation.classification == NewsClassification.EARNINGS_RESULT.value:
+            earnings_items.append(item)
+        else:
+            regular_items.append(item)
+
+    articles = []
+
+    # ── Stage 2: Generate Regular Articles ────────────────────────────────────
+    if regular_items:
+        regular_articles = await generate_articles_from_evaluated(client, model_name, regular_items)
+        articles.extend(regular_articles)
+        
+    # ── Generate Earnings Reports ─────────────────────────────────────────────
+    if earnings_items:
+        for ei in earnings_items:
+            try:
+                report_article = await generate_earnings_report(client, model_name, ei)
+                if report_article:
+                    articles.append(report_article)
+            except Exception as exc:
+                logger.exception("[News] Failed to generate earnings report in standalone mode: %s", exc)
+
     stats["stage2_generated"] = len(articles)
 
     return articles, stats, evaluated_all_updated

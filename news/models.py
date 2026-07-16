@@ -31,8 +31,8 @@ from __future__ import annotations
 
 import hashlib
 from enum import Enum
-from typing import List, Optional
-from pydantic import BaseModel, Field
+from typing import List, Optional, Any
+from pydantic import BaseModel, Field, model_serializer
 
 
 # ─── Shared enumerations ─────────────────────────────────────────────────────
@@ -105,6 +105,12 @@ class EventCategory(str, Enum):
     OTHER               = "Other"
 
 
+class NewsClassification(str, Enum):
+    """Stage 1 classification: determines which pipeline processes the item."""
+    REGULAR_NEWS    = "REGULAR_NEWS"
+    EARNINGS_RESULT = "EARNINGS_RESULT"
+
+
 class FilterDecision(str, Enum):
     """Result of Stage 1 score-based filtering."""
     GENERATE  = "generate"    # score >= high_threshold
@@ -160,6 +166,10 @@ class EvaluationResult(BaseModel):
     time_horizon:           str   = Field(description="short_term_catalyst | long_term_structural | both")
     reason:                 str   = Field(description="One concise sentence explaining the score.")
     event_category:         str   = Field(description="Detected event category string.")
+    classification:         str   = Field(
+        default="REGULAR_NEWS",
+        description="REGULAR_NEWS or EARNINGS_RESULT — determines pipeline routing.",
+    )
     executive_summary:      str   = Field(
         description=(
             "4 short paragraphs: (1) what happened, (2) historical context & why it matters, "
@@ -207,9 +217,12 @@ class NewsArticle(BaseModel):
         )
     )
     # Classification
-    story:               str = Field(description="Full ~500-word article body")
-    sentiment:           str = Field(description="Positive | Negative | Neutral | Mixed")
-    market_impact_level: str = Field(description="Low | Medium | High | Critical")
+    content_type:        str = Field(default="news", description="news | earnings")
+    earnings_analysis:   Optional[dict] = Field(None, description="Earnings intelligence if content_type is 'earnings'")
+
+    story:               str = Field(default="", description="Full ~500-word article body")
+    sentiment:           str = Field(default="Neutral", description="Positive | Negative | Neutral | Mixed")
+    market_impact_level: str = Field(default="Medium", description="Low | Medium | High | Critical")
 
     # Scores (0-100) — carried forward from Stage 1
     market_relevance_score: int = Field(ge=0, le=100, default=0)
@@ -217,9 +230,9 @@ class NewsArticle(BaseModel):
     time_horizon:           str = Field(default="both")
 
     # Stage 2 impact narratives
-    market_impact:           str
-    retail_investor_impact:  str
-    institutional_impact:    str
+    market_impact:           str = Field(default="")
+    retail_investor_impact:  str = Field(default="")
+    institutional_impact:    str = Field(default="")
 
     # Trading/Risk analysis
     trading_implications: Optional[str] = Field(None, description="Short-term trading implications.")
@@ -246,6 +259,18 @@ class NewsArticle(BaseModel):
     # Stage 1 traceability
     event_category:  Optional[str] = Field(None, description="Event category detected in Stage 1.")
 
+    @model_serializer(mode='wrap')
+    def serialize_model(self, handler) -> dict[str, Any]:
+        data = handler(self)
+        if data.get("content_type") == "earnings":
+            fields_to_remove = [
+                "story", "sentiment", "market_impact_level", "market_impact",
+                "retail_investor_impact", "institutional_impact", "trading_implications",
+                "risk_factors", "future_outlook", "time_horizon"
+            ]
+            for field in fields_to_remove:
+                data.pop(field, None)
+        return data
 
 
 # ─── Image Provider Models ───────────────────────────────────────────────────
@@ -324,3 +349,6 @@ class SchedulerStatusResponse(BaseModel):
     last_stage1_evaluated: Optional[int] = Field(None, description="Items evaluated in last Stage 1 run.")
     last_stage1_passed:    Optional[int] = Field(None, description="Items that passed Stage 1 filtering.")
     last_stage2_generated: Optional[int] = Field(None, description="Articles generated in last Stage 2 run.")
+    # Earnings pipeline stats
+    last_earnings_detected:  Optional[int] = Field(None, description="EARNINGS_RESULT items detected in last run.")
+    last_earnings_generated: Optional[int] = Field(None, description="Earnings reports generated in last run.")
