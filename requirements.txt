@@ -23,3 +23,7 @@ requests>=2.31.0
 websockets>=12.0
 python-dateutil>=2.9.0
 kiteconnect
+
+# ── XBRL/XML/HTML parsing (Financial Results module) ─────────────────────────────
+lxml>=5.0.0
+beautifulsoup4>=4.12.0

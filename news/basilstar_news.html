@@ -113,6 +113,30 @@ body {
 .refresh-btn:hover { background: #163d30; }
 .refresh-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* ── View tabs (News / Financial Results) ── */
+.view-tabs {
+  display: flex; gap: 2px;
+  background: var(--paper2);
+  border-bottom: 1px solid var(--line);
+  padding: 0 32px;
+  position: sticky; top: 64px; z-index: 90;
+}
+.view-tab {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-faint);
+  background: none; border: none; border-bottom: 2px solid transparent;
+  padding: 12px 4px; margin-right: 26px; cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.view-tab:hover { color: var(--ink-soft); }
+.view-tab.active { color: var(--forest); border-bottom-color: var(--forest); font-weight: 600; }
+.view-tab .tab-count {
+  font-size: 9.5px; color: var(--ink-faint); background: var(--card);
+  border: 1px solid var(--line2); border-radius: 999px; padding: 1px 7px;
+}
+.view-tab.active .tab-count { color: var(--forest); border-color: rgba(28,77,60,0.25); }
+
 /* ── Layout ── */
 .layout {
   display: grid; grid-template-columns: 236px 1fr;
@@ -123,8 +147,8 @@ body {
 .sidebar {
   border-right: 1px solid var(--line);
   padding: 24px 0;
-  position: sticky; top: 64px;
-  height: calc(100vh - 64px);
+  position: sticky; top: 105px;
+  height: calc(100vh - 105px);
   overflow-y: auto;
   background: var(--paper2);
 }
@@ -355,6 +379,117 @@ body {
 .story-source-line a { color: var(--forest); text-decoration: none; }
 .story-source-line a:hover { text-decoration: underline; }
 
+/* ══════════════════ Financial Results ══════════════════ */
+
+.fi-card {
+  background: var(--card);
+  border: 1px solid var(--line2);
+  border-radius: var(--r2);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  display: grid;
+  grid-template-columns: 188px 1fr;
+  position: relative;
+}
+.fi-card:hover { border-color: var(--forest); box-shadow: 0 4px 18px rgba(28,77,60,0.09); }
+.fi-card.expanded { border-color: var(--forest); }
+@media (max-width: 700px) { .fi-card { grid-template-columns: 1fr; } }
+
+/* left ticker rail — reads like a certificate stub */
+.fi-rail {
+  position: relative;
+  background: var(--paper2);
+  border-right: 1px dashed var(--line2);
+  padding: 18px 16px;
+  display: flex; flex-direction: column;
+}
+.fi-rail::before {
+  content: '';
+  position: absolute; top: 0; left: 0; bottom: 0; width: 4px;
+}
+.fi-rail.rail-bullish::before { background: var(--up); }
+.fi-rail.rail-bearish::before { background: var(--down); }
+.fi-rail.rail-neutral::before { background: var(--neutral); }
+.fi-rail.rail-mixed::before   { background: var(--mixed); }
+
+.fi-symbol { font-family: var(--serif); font-weight: 700; font-size: 23px; letter-spacing: -0.01em; color: var(--ink); line-height: 1.1; }
+.fi-exchange { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.1em; color: var(--ink-faint); margin-top: 3px; }
+.fi-company { font-size: 11.5px; color: var(--ink-soft); line-height: 1.4; margin-top: 9px; }
+.fi-rail-divider { border-top: 1px dashed var(--line2); margin: 12px 0 10px; }
+.fi-quarter { font-family: var(--mono); font-size: 10.5px; color: var(--forest); font-weight: 600; }
+.fi-result-date { font-family: var(--mono); font-size: 10px; color: var(--ink-faint); margin-top: 3px; }
+
+/* recommendation stamp */
+.stamp {
+  position: absolute; top: 14px; right: 16px;
+  font-family: var(--mono); font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 5px 13px; border: 2px solid currentColor; border-radius: 2px;
+  transform: rotate(-5deg);
+  background: rgba(255,253,248,0.7);
+}
+.stamp::after {
+  content: ''; position: absolute; inset: 2px; border: 1px solid currentColor; border-radius: 1px;
+}
+.stamp-buy  { color: var(--up); }
+.stamp-sell { color: var(--down); }
+.stamp-hold { color: var(--neutral); }
+
+.fi-body { padding: 16px 20px 16px 18px; display: flex; flex-direction: column; }
+.fi-chips-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; padding-right: 90px; }
+.fi-headline {
+  font-family: var(--serif); font-size: 18px; font-weight: 600; letter-spacing: -0.01em;
+  line-height: 1.35; margin-bottom: 8px; color: var(--ink);
+}
+.fi-summary { font-size: 13px; color: var(--ink-soft); line-height: 1.65; margin-bottom: 12px; flex: 1; }
+
+/* metrics ledger row */
+.fi-metrics-row {
+  display: flex; gap: 26px; flex-wrap: wrap;
+  padding: 12px 14px; margin-bottom: 16px;
+  background: var(--paper2); border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+.fi-metric { display: flex; flex-direction: column; gap: 3px; }
+.fi-metric-label { font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+.fi-metric-value { font-family: var(--mono); font-size: 15px; font-weight: 600; color: var(--ink); }
+.fi-metric-delta { font-family: var(--mono); font-size: 11px; font-weight: 600; }
+.delta-up   { color: var(--up); }
+.delta-down { color: var(--down); }
+
+.fi-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 8px; margin-top: auto;
+  padding-top: 10px; border-top: 1px solid var(--line);
+}
+.fi-meta { font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); display: flex; gap: 12px; flex-wrap: wrap; }
+
+/* expanded FI story */
+.fi-story { display: none; grid-column: 1 / -1; border-top: 2px solid var(--ink); padding: 22px 26px 26px; background: var(--paper2); }
+.fi-card.expanded .fi-story { display: block; }
+
+.forecast-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 6px; }
+@media (max-width: 600px) { .forecast-grid { grid-template-columns: 1fr; } }
+.forecast-card { background: var(--card); border: 1px solid var(--line2); border-radius: var(--r); padding: 13px 15px; }
+.forecast-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.forecast-dir { font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: 0.06em; }
+.dir-up   { color: var(--up); }
+.dir-down { color: var(--down); }
+.dir-flat { color: var(--neutral); }
+.forecast-conf {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-faint); border: 1px solid var(--line2); border-radius: 999px; padding: 2px 8px;
+}
+.forecast-reason { font-size: 12.5px; color: var(--ink-soft); line-height: 1.6; }
+
+.fi-detail-strip {
+  margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--line2);
+  font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint);
+  display: flex; flex-wrap: wrap; gap: 8px 18px;
+}
+.fi-detail-strip b { color: var(--forest); font-weight: 600; }
+
 /* ── Skeleton ── */
 .skeleton {
   background: linear-gradient(90deg, var(--card) 25%, var(--paper2) 50%, var(--card) 75%);
@@ -399,6 +534,7 @@ body {
   .main { padding: 18px; }
   .topbar { padding: 0 16px; }
   .meta-chip { display: none; }
+  .view-tabs { padding: 0 16px; }
 }
 
 /* ── Scrollbar ── */
@@ -428,67 +564,159 @@ body {
   </div>
 </header>
 
+<nav class="view-tabs">
+  <button class="view-tab active" id="tab-news" onclick="switchView('news')">
+    News feed <span class="tab-count" id="newsTabCount">—</span>
+  </button>
+  <button class="view-tab" id="tab-results" onclick="switchView('results')">
+    Financial results <span class="tab-count" id="resultsTabCount">—</span>
+  </button>
+</nav>
+
 <div class="layout">
 
   <aside class="sidebar">
-    <div class="sidebar-section">
-      <div class="sidebar-label">Search</div>
-      <input class="search-box" type="text" id="searchInput" placeholder="Keyword, company…" />
-    </div>
 
-    <div class="sidebar-section">
-      <div class="sidebar-label">Sentiment</div>
-      <div class="filter-group" id="sentimentFilters">
-        <button class="filter-btn active" data-val="" onclick="setFilter('sentiment','',this)">All signals</button>
-        <button class="filter-btn" data-val="Positive" onclick="setFilter('sentiment','Positive',this)">Positive</button>
-        <button class="filter-btn" data-val="Negative" onclick="setFilter('sentiment','Negative',this)">Negative</button>
-        <button class="filter-btn" data-val="Neutral"  onclick="setFilter('sentiment','Neutral',this)">Neutral</button>
-        <button class="filter-btn" data-val="Mixed"    onclick="setFilter('sentiment','Mixed',this)">Mixed</button>
+    <!-- News filters -->
+    <div id="newsFilters">
+      <div class="sidebar-section">
+        <div class="sidebar-label">Search</div>
+        <input class="search-box" type="text" id="searchInput" placeholder="Keyword, company…" />
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Sentiment</div>
+        <div class="filter-group" id="sentimentFilters">
+          <button class="filter-btn active" data-val="" onclick="setFilter('sentiment','',this)">All signals</button>
+          <button class="filter-btn" data-val="Positive" onclick="setFilter('sentiment','Positive',this)">Positive</button>
+          <button class="filter-btn" data-val="Negative" onclick="setFilter('sentiment','Negative',this)">Negative</button>
+          <button class="filter-btn" data-val="Neutral"  onclick="setFilter('sentiment','Neutral',this)">Neutral</button>
+          <button class="filter-btn" data-val="Mixed"    onclick="setFilter('sentiment','Mixed',this)">Mixed</button>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Impact level</div>
+        <div class="filter-group">
+          <button class="filter-btn active" data-val="" onclick="setFilter('impact','',this)">All levels</button>
+          <button class="filter-btn" data-val="Critical" onclick="setFilter('impact','Critical',this)">Critical</button>
+          <button class="filter-btn" data-val="High"     onclick="setFilter('impact','High',this)">High</button>
+          <button class="filter-btn" data-val="Medium"   onclick="setFilter('impact','Medium',this)">Medium</button>
+          <button class="filter-btn" data-val="Low"      onclick="setFilter('impact','Low',this)">Low</button>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Category</div>
+        <div class="filter-group" id="categoryFilters" style="max-height:340px; overflow-y:auto;">
+          <button class="filter-btn active" data-val="" onclick="setFilter('category','',this)">All categories</button>
+        </div>
       </div>
     </div>
 
-    <div class="sidebar-section">
-      <div class="sidebar-label">Impact level</div>
-      <div class="filter-group">
-        <button class="filter-btn active" data-val="" onclick="setFilter('impact','',this)">All levels</button>
-        <button class="filter-btn" data-val="Critical" onclick="setFilter('impact','Critical',this)">Critical</button>
-        <button class="filter-btn" data-val="High"     onclick="setFilter('impact','High',this)">High</button>
-        <button class="filter-btn" data-val="Medium"   onclick="setFilter('impact','Medium',this)">Medium</button>
-        <button class="filter-btn" data-val="Low"      onclick="setFilter('impact','Low',this)">Low</button>
+    <!-- Financial results filters -->
+    <div id="resultsFilters" style="display:none;">
+      <div class="sidebar-section">
+        <div class="sidebar-label">Search</div>
+        <input class="search-box" type="text" id="fiSearchInput" placeholder="Company, symbol…" />
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Sentiment</div>
+        <div class="filter-group" id="fiSentimentFilters">
+          <button class="filter-btn active" data-val="" onclick="setFiFilter('sentiment','',this)">All signals</button>
+          <button class="filter-btn" data-val="BULLISH" onclick="setFiFilter('sentiment','BULLISH',this)">Bullish</button>
+          <button class="filter-btn" data-val="BEARISH" onclick="setFiFilter('sentiment','BEARISH',this)">Bearish</button>
+          <button class="filter-btn" data-val="NEUTRAL" onclick="setFiFilter('sentiment','NEUTRAL',this)">Neutral</button>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Recommendation</div>
+        <div class="filter-group" id="fiRecFilters">
+          <button class="filter-btn active" data-val="" onclick="setFiFilter('recommendation','',this)">All calls</button>
+          <button class="filter-btn" data-val="BUY"  onclick="setFiFilter('recommendation','BUY',this)">Buy</button>
+          <button class="filter-btn" data-val="HOLD" onclick="setFiFilter('recommendation','HOLD',this)">Hold</button>
+          <button class="filter-btn" data-val="SELL" onclick="setFiFilter('recommendation','SELL',this)">Sell</button>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Impact level</div>
+        <div class="filter-group" id="fiImpactFilters">
+          <button class="filter-btn active" data-val="" onclick="setFiFilter('impact','',this)">All levels</button>
+          <button class="filter-btn" data-val="CRITICAL" onclick="setFiFilter('impact','CRITICAL',this)">Critical</button>
+          <button class="filter-btn" data-val="HIGH"     onclick="setFiFilter('impact','HIGH',this)">High</button>
+          <button class="filter-btn" data-val="MEDIUM"   onclick="setFiFilter('impact','MEDIUM',this)">Medium</button>
+          <button class="filter-btn" data-val="LOW"      onclick="setFiFilter('impact','LOW',this)">Low</button>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Exchange</div>
+        <div class="filter-group" id="fiExchangeFilters">
+          <button class="filter-btn active" data-val="" onclick="setFiFilter('exchange','',this)">All exchanges</button>
+          <button class="filter-btn" data-val="NSE" onclick="setFiFilter('exchange','NSE',this)">NSE</button>
+          <button class="filter-btn" data-val="BSE" onclick="setFiFilter('exchange','BSE',this)">BSE</button>
+        </div>
       </div>
     </div>
 
-    <div class="sidebar-section">
-      <div class="sidebar-label">Category</div>
-      <div class="filter-group" id="categoryFilters" style="max-height:340px; overflow-y:auto;">
-        <button class="filter-btn active" data-val="" onclick="setFilter('category','',this)">All categories</button>
-      </div>
-    </div>
   </aside>
 
   <main class="main">
-    <div class="feed-header">
-      <div class="feed-eyebrow">Live intelligence feed</div>
-      <h1 class="feed-title">Market Intelligence</h1>
-      <p class="feed-sub" id="feedCount">Loading articles…</p>
-    </div>
 
-    <div class="controls-bar">
-      <div class="sort-row">
-        <button class="sort-btn active" data-val="newest"     onclick="setSort('newest',this)">Newest</button>
-        <button class="sort-btn" data-val="oldest"            onclick="setSort('oldest',this)">Oldest</button>
-        <button class="sort-btn" data-val="importance"        onclick="setSort('importance',this)">Relevance</button>
+    <!-- NEWS VIEW -->
+    <div id="newsView">
+      <div class="feed-header">
+        <div class="feed-eyebrow">Live intelligence feed</div>
+        <h1 class="feed-title">Market Intelligence</h1>
+        <p class="feed-sub" id="feedCount">Loading articles…</p>
       </div>
-      <span class="feed-count-badge" id="feedCountBadge"></span>
+
+      <div class="controls-bar">
+        <div class="sort-row">
+          <button class="sort-btn active" data-val="newest"     onclick="setSort('newest',this)">Newest</button>
+          <button class="sort-btn" data-val="oldest"            onclick="setSort('oldest',this)">Oldest</button>
+          <button class="sort-btn" data-val="importance"        onclick="setSort('importance',this)">Relevance</button>
+        </div>
+        <span class="feed-count-badge" id="feedCountBadge"></span>
+      </div>
+
+      <div class="articles" id="articlesFeed">
+        <div class="skel-card"><div class="skeleton skel-img"></div><div class="skel-body"><div class="skeleton skel-h"></div><div class="skeleton skel-line skel-b1"></div><div class="skeleton skel-line skel-b2"></div></div></div>
+        <div class="skel-card"><div class="skeleton skel-img"></div><div class="skel-body"><div class="skeleton skel-h"></div><div class="skeleton skel-line skel-b1"></div><div class="skeleton skel-line skel-b2"></div></div></div>
+        <div class="skel-card"><div class="skeleton skel-img"></div><div class="skel-body"><div class="skeleton skel-h"></div><div class="skeleton skel-line skel-b1"></div><div class="skeleton skel-line skel-b2"></div></div></div>
+      </div>
+
+      <button class="load-more" id="loadMoreBtn" style="display:none" onclick="loadMore()">Load more articles</button>
     </div>
 
-    <div class="articles" id="articlesFeed">
-      <div class="skel-card"><div class="skeleton skel-img"></div><div class="skel-body"><div class="skeleton skel-h"></div><div class="skeleton skel-line skel-b1"></div><div class="skeleton skel-line skel-b2"></div></div></div>
-      <div class="skel-card"><div class="skeleton skel-img"></div><div class="skel-body"><div class="skeleton skel-h"></div><div class="skeleton skel-line skel-b1"></div><div class="skeleton skel-line skel-b2"></div></div></div>
-      <div class="skel-card"><div class="skeleton skel-img"></div><div class="skel-body"><div class="skeleton skel-h"></div><div class="skeleton skel-line skel-b1"></div><div class="skeleton skel-line skel-b2"></div></div></div>
+    <!-- FINANCIAL RESULTS VIEW -->
+    <div id="resultsView" style="display:none;">
+      <div class="feed-header">
+        <div class="feed-eyebrow">Earnings & filings desk</div>
+        <h1 class="feed-title">Financial Results</h1>
+        <p class="feed-sub" id="fiFeedCount">Loading results…</p>
+      </div>
+
+      <div class="controls-bar">
+        <div class="sort-row">
+          <button class="sort-btn active" data-val="newest" onclick="setFiSort('newest',this)">Newest</button>
+          <button class="sort-btn" data-val="oldest"        onclick="setFiSort('oldest',this)">Oldest</button>
+          <button class="sort-btn" data-val="impact"        onclick="setFiSort('impact',this)">Impact</button>
+        </div>
+        <span class="feed-count-badge" id="fiFeedCountBadge"></span>
+      </div>
+
+      <div class="articles" id="resultsFeed">
+        <div class="skel-card"><div class="skeleton skel-img"></div><div class="skel-body"><div class="skeleton skel-h"></div><div class="skeleton skel-line skel-b1"></div><div class="skeleton skel-line skel-b2"></div></div></div>
+        <div class="skel-card"><div class="skeleton skel-img"></div><div class="skel-body"><div class="skeleton skel-h"></div><div class="skeleton skel-line skel-b1"></div><div class="skeleton skel-line skel-b2"></div></div></div>
+      </div>
+
+      <button class="load-more" id="fiLoadMoreBtn" style="display:none" onclick="loadMoreFi()">Load more results</button>
     </div>
 
-    <button class="load-more" id="loadMoreBtn" style="display:none" onclick="loadMore()">Load more articles</button>
   </main>
 
 </div>
@@ -498,6 +726,8 @@ const API_BASE   = 'http://127.0.0.1:8000';
 const NEWS_URL   = `${API_BASE}/news`;
 const STATUS_URL = `${API_BASE}/news/status`;
 const REFRESH_URL= `${API_BASE}/news/refresh`;
+// Adjust this to match your backend's actual route for the FI feature.
+const RESULTS_URL = `${API_BASE}/financial-results`;
 
 const EVENT_CATEGORIES = [
   "Results","Guidance Revision","Dividend","Bonus","Stock Split","Buyback",
@@ -510,23 +740,50 @@ const EVENT_CATEGORIES = [
   "Bankruptcy","Legal Action","Index Change","Other"
 ];
 
+let currentView = 'news';
+
 const state = {
   articles: [], total: 0, page: 1, pageSize: 20,
   sort: 'newest', sentiment: '', impact: '', category: '', search: '',
-  loading: false, categories: new Set(),
+  loading: false,
+};
+
+const fiState = {
+  results: [], total: 0, page: 1, pageSize: 20,
+  sort: 'newest', sentiment: '', impact: '', recommendation: '', exchange: '', search: '',
+  loading: false, loaded: false,
 };
 
 document.addEventListener('DOMContentLoaded', () => {
   buildCategoryFilters();
   fetchStatus();
   fetchArticles(true);
+
   let t;
   document.getElementById('searchInput').addEventListener('input', e => {
     clearTimeout(t);
     t = setTimeout(() => { state.search = e.target.value.trim(); fetchArticles(true); }, 350);
   });
+
+  let t2;
+  document.getElementById('fiSearchInput').addEventListener('input', e => {
+    clearTimeout(t2);
+    t2 = setTimeout(() => { fiState.search = e.target.value.trim(); fetchFiResults(true); }, 350);
+  });
+
   setInterval(fetchStatus, 30000);
 });
+
+function switchView(view) {
+  currentView = view;
+  document.getElementById('tab-news').classList.toggle('active', view === 'news');
+  document.getElementById('tab-results').classList.toggle('active', view === 'results');
+  document.getElementById('newsView').style.display = view === 'news' ? 'block' : 'none';
+  document.getElementById('resultsView').style.display = view === 'results' ? 'block' : 'none';
+  document.getElementById('newsFilters').style.display = view === 'news' ? 'block' : 'none';
+  document.getElementById('resultsFilters').style.display = view === 'results' ? 'block' : 'none';
+  if (view === 'results' && !fiState.loaded) fetchFiResults(true);
+}
 
 function buildCategoryFilters() {
   const c = document.getElementById('categoryFilters');
@@ -586,6 +843,7 @@ async function fetchArticles(reset = false) {
       `Showing ${showing} of ${state.total} articles`;
     document.getElementById('feedCountBadge').textContent =
       `${showing} / ${state.total}`;
+    document.getElementById('newsTabCount').textContent = d.total ?? showing;
     const lb = document.getElementById('loadMoreBtn');
     lb.style.display = showing < state.total ? 'block' : 'none';
     lb.textContent = `Load ${Math.min(state.pageSize, state.total - showing)} more · ${state.total - showing} remaining`;
@@ -620,6 +878,13 @@ function fmtDate(iso) {
   const d = new Date(iso);
   if (isNaN(d)) return iso;
   return d.toLocaleString(undefined, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtDateShort(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 function buildCard(a) {
@@ -720,7 +985,7 @@ function setFilter(type, val, btn) {
 
 function setSort(val, btn) {
   state.sort = val;
-  document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#newsView .sort-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   fetchArticles(true);
 }
@@ -734,6 +999,218 @@ async function triggerRefresh() {
   setTimeout(() => { fetchArticles(true); fetchStatus(); }, 2000);
   setTimeout(() => { btn.disabled = false; btn.textContent = '↻ Refresh'; }, 4000);
 }
+
+/* ══════════════════ Financial Results logic ══════════════════ */
+
+function fmtCr(n) {
+  if (n === null || n === undefined) return '—';
+  return `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })} Cr`;
+}
+
+function fmtPct(n) {
+  if (n === null || n === undefined) return null;
+  const v = Number(n);
+  return { text: `${v >= 0 ? '▲' : '▼'} ${Math.abs(v).toFixed(1)}%`, up: v >= 0 };
+}
+
+async function fetchFiResults(reset = false) {
+  if (fiState.loading) return;
+  fiState.loading = true;
+  if (reset) { fiState.page = 1; fiState.results = []; }
+  const p = new URLSearchParams({ page: fiState.page, page_size: fiState.pageSize, sort: fiState.sort });
+  if (fiState.sentiment)      p.set('sentiment', fiState.sentiment);
+  if (fiState.impact)         p.set('impact', fiState.impact);
+  if (fiState.recommendation) p.set('recommendation', fiState.recommendation);
+  if (fiState.exchange)       p.set('exchange', fiState.exchange);
+  if (fiState.search)         p.set('search', fiState.search);
+  try {
+    const r = await fetch(`${RESULTS_URL}?${p}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    const items = d.results || [];
+    fiState.total   = d.total ?? items.length;
+    fiState.results = reset ? items : [...fiState.results, ...items];
+    fiState.loaded  = true;
+    renderFiResults(reset);
+    const showing = fiState.results.length;
+    document.getElementById('fiFeedCount').textContent =
+      `Showing ${showing} of ${fiState.total} results`;
+    document.getElementById('fiFeedCountBadge').textContent =
+      `${showing} / ${fiState.total}`;
+    document.getElementById('resultsTabCount').textContent = fiState.total;
+    const lb = document.getElementById('fiLoadMoreBtn');
+    lb.style.display = showing < fiState.total ? 'block' : 'none';
+    lb.textContent = `Load ${Math.min(fiState.pageSize, fiState.total - showing)} more · ${fiState.total - showing} remaining`;
+  } catch (err) {
+    document.getElementById('resultsFeed').innerHTML =
+      `<div class="empty"><span class="icon">⚠</span>Could not reach the API.<br>Check connection.</div>`;
+  } finally { fiState.loading = false; }
+}
+
+function renderFiResults(reset) {
+  const feed = document.getElementById('resultsFeed');
+  if (reset) {
+    if (!fiState.results.length) {
+      feed.innerHTML = `<div class="empty"><span class="icon">◎</span>No results match your filters.</div>`;
+      return;
+    }
+    feed.innerHTML = '';
+  }
+  const batch = reset ? fiState.results : fiState.results.slice(-fiState.pageSize);
+  batch.forEach(r => feed.appendChild(buildFiCard(r)));
+}
+
+function buildFiCard(r) {
+  const div = document.createElement('div');
+  div.className = 'fi-card';
+  div.dataset.id = r.id;
+
+  const sent = (r.sentiment || 'NEUTRAL').toLowerCase();
+  const impact = (r.impact || '').toLowerCase();
+  const rec = (r.recommendation || 'HOLD').toLowerCase();
+
+  const railClass = { bullish: 'rail-bullish', bearish: 'rail-bearish', neutral: 'rail-neutral', mixed: 'rail-mixed' }[sent] || 'rail-neutral';
+  const chipSentClass = { bullish: 'chip-positive', bearish: 'chip-negative', neutral: 'chip-neutral', mixed: 'chip-mixed' }[sent] || 'chip-neutral';
+  const chipImpactClass = { critical: 'chip-impact-critical', high: 'chip-impact-high', medium: 'chip-impact-medium', low: 'chip-impact-low' }[impact] || 'chip-impact-medium';
+  const stampClass = { buy: 'stamp-buy', sell: 'stamp-sell', hold: 'stamp-hold' }[rec] || 'stamp-hold';
+
+  const revDelta = fmtPct(r.revenue_change_yoy);
+  const profitDelta = fmtPct(r.profit_change_yoy);
+  const epsDelta = fmtPct(r.eps_change_yoy);
+
+  const metricsHtml = `
+    <div class="fi-metrics-row">
+      <div class="fi-metric">
+        <span class="fi-metric-label">Revenue</span>
+        <span class="fi-metric-value">${fmtCr(r.revenue)}</span>
+        ${revDelta ? `<span class="fi-metric-delta ${revDelta.up ? 'delta-up' : 'delta-down'}">${revDelta.text} YoY</span>` : ''}
+      </div>
+      <div class="fi-metric">
+        <span class="fi-metric-label">Net profit</span>
+        <span class="fi-metric-value">${fmtCr(r.profit_net)}</span>
+        ${profitDelta ? `<span class="fi-metric-delta ${profitDelta.up ? 'delta-up' : 'delta-down'}">${profitDelta.text} YoY</span>` : ''}
+      </div>
+      ${r.basic_eps !== null && r.basic_eps !== undefined ? `
+      <div class="fi-metric">
+        <span class="fi-metric-label">EPS</span>
+        <span class="fi-metric-value">₹${Number(r.basic_eps).toFixed(2)}</span>
+        ${epsDelta ? `<span class="fi-metric-delta ${epsDelta.up ? 'delta-up' : 'delta-down'}">${epsDelta.text} YoY</span>` : ''}
+      </div>` : ''}
+      ${r.profit_before_tax !== null && r.profit_before_tax !== undefined ? `
+      <div class="fi-metric">
+        <span class="fi-metric-label">Profit before tax</span>
+        <span class="fi-metric-value">${fmtCr(r.profit_before_tax)}</span>
+      </div>` : ''}
+      ${r.ebitda !== null && r.ebitda !== undefined ? `
+      <div class="fi-metric">
+        <span class="fi-metric-label">EBITDA</span>
+        <span class="fi-metric-value">${fmtCr(r.ebitda)}</span>
+      </div>` : ''}
+      ${r.operating_profit !== null && r.operating_profit !== undefined ? `
+      <div class="fi-metric">
+        <span class="fi-metric-label">Operating profit</span>
+        <span class="fi-metric-value">${fmtCr(r.operating_profit)}</span>
+      </div>` : ''}
+      ${r.depreciation !== null && r.depreciation !== undefined ? `
+      <div class="fi-metric">
+        <span class="fi-metric-label">Depreciation</span>
+        <span class="fi-metric-value">${fmtCr(r.depreciation)}</span>
+      </div>` : ''}
+    </div>`;
+
+  const forecastCard = (label, f) => {
+    if (!f) return '';
+    const dirClass = { UP: 'dir-up', DOWN: 'dir-down' }[f.direction] || 'dir-flat';
+    const arrow = { UP: '▲', DOWN: '▼' }[f.direction] || '→';
+    return `
+      <div class="forecast-card">
+        <div class="forecast-head">
+          <span class="story-label" style="margin-bottom:0;">${esc(label)}</span>
+          <span class="forecast-conf">${esc(f.confidence || '—')} confidence</span>
+        </div>
+        <div class="forecast-dir ${dirClass}">${arrow} ${esc(f.direction || '—')}</div>
+        <div class="forecast-reason" style="margin-top:6px;">${esc(f.reason || '')}</div>
+      </div>`;
+  };
+
+  const marginBits = [];
+  if (r.pat_margin !== null && r.pat_margin !== undefined) marginBits.push(`PAT margin <b>${Number(r.pat_margin).toFixed(1)}%</b>`);
+  if (r.ebitda_margin !== null && r.ebitda_margin !== undefined) marginBits.push(`EBITDA margin <b>${Number(r.ebitda_margin).toFixed(1)}%</b>`);
+  if (r.operating_profit_margin !== null && r.operating_profit_margin !== undefined && !r.ebitda_margin) marginBits.push(`Operating margin <b>${Number(r.operating_profit_margin).toFixed(1)}%</b>`);
+
+  div.innerHTML = `
+    <div class="fi-rail ${railClass}">
+      <div class="fi-symbol">${esc(r.symbol || '—')}</div>
+      <div class="fi-exchange">${esc(r.exchange || '')}</div>
+      <div class="fi-company">${esc(r.company_name || '')}</div>
+      <div class="fi-rail-divider"></div>
+      <div class="fi-quarter">${esc(r.quarter || '')}</div>
+      <div class="fi-result-date">${fmtDateShort(r.result_date)}</div>
+    </div>
+    <div class="fi-body">
+      <span class="stamp ${stampClass}">${esc(r.recommendation || 'HOLD')}</span>
+      <div class="fi-chips-row">
+        <span class="chip ${chipSentClass}">${esc(r.sentiment || 'NEUTRAL')}</span>
+        ${r.impact ? `<span class="chip ${chipImpactClass}">${esc(r.impact)} impact</span>` : ''}
+        ${r.standalone_consolidated ? `<span class="chip chip-category">${esc(r.standalone_consolidated)}</span>` : ''}
+      </div>
+      <div class="fi-headline">${esc(r.headline)}</div>
+      <div class="fi-summary">${esc(r.executive_summary || '')}</div>
+      <div class="fi-footer">
+        <div class="fi-meta"><span>${esc(r.financial_year || '')}</span></div>
+        <span class="expand-btn" id="fi-hint-${r.id}">Read full report ↓</span>
+      </div>
+    </div>
+    <div class="fi-story">
+      <div class="story-section">
+        <div class="story-label">Key figures</div>
+        ${metricsHtml}
+      </div>
+      ${r.guidance ? `
+      <div class="story-section">
+        <div class="story-label">Management guidance</div>
+        <div class="story-text">${esc(r.guidance)}</div>
+      </div>` : ''}
+      ${(r.forecast_short_term || r.forecast_medium_term) ? `
+      <div class="story-section">
+        <div class="story-label">Outlook</div>
+        <div class="forecast-grid">
+          ${forecastCard('Short term', r.forecast_short_term)}
+          ${forecastCard('Medium term', r.forecast_medium_term)}
+        </div>
+      </div>` : ''}
+      <div class="fi-detail-strip">
+        ${marginBits.length ? marginBits.map(b => `<span>${b}</span>`).join('') : ''}
+        ${r.filing_type ? `<span>Filing <b>${esc(r.filing_type)}</b></span>` : ''}
+        ${r.period_start && r.period_end ? `<span>Period <b>${esc(r.period_start)} → ${esc(r.period_end)}</b></span>` : ''}
+      </div>
+    </div>`;
+
+  div.addEventListener('click', () => {
+    div.classList.toggle('expanded');
+    const h = document.getElementById(`fi-hint-${r.id}`);
+    if (h) h.textContent = div.classList.contains('expanded') ? 'Collapse ↑' : 'Read full report ↓';
+  });
+
+  return div;
+}
+
+function setFiFilter(type, val, btn) {
+  fiState[type] = val;
+  const g = btn.closest('.filter-group') || btn.parentElement;
+  g.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  fetchFiResults(true);
+}
+
+function setFiSort(val, btn) {
+  fiState.sort = val;
+  document.querySelectorAll('#resultsView .sort-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  fetchFiResults(true);
+}
+
+function loadMoreFi() { fiState.page++; fetchFiResults(false); }
 </script>
 </body>
 </html>

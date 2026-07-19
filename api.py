@@ -11,16 +11,25 @@ from config import GEMINI_API_KEY, GEMINI_MODEL, ALLOWED_ORIGINS
 from prompts import get_daily_market_summary_prompt
 
 from news.api import router as news_router, init_news_module, close_news_module
+from financial_results.api import router as results_router, init_results_module, close_results_module
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    force=True,
+)
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize news module components
     await init_news_module(app)
+    # Initialize financial results module components
+    await init_results_module(app)
     yield
+    # Cleanup financial results module components
+    await close_results_module(app)
     # Cleanup news module components
     await close_news_module(app)
 
@@ -42,6 +51,7 @@ app.add_middleware(
 )
 
 app.include_router(news_router)
+app.include_router(results_router)
 
 # Initialize GenAI client
 if not GEMINI_API_KEY:
