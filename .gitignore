@@ -27,3 +27,7 @@ local_settings.py
 local.py
 txt.txt
 venv
+*.db
+*.sqlite
+*.db-shm
+*.db-wal
